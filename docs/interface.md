@@ -121,11 +121,36 @@ Otherwise each Chumby is rendered when it first appears, then every
 
 If the companion learns facts about the Chumby (from its session), it can write them to
 `$NEOCHUMBY_CLASSIC_STATE/info/<chumby>` (atomically: a temp file, then rename), as
-`key=value` lines: `ssid ap rate signal quality ip mac gateway dns hostname firmware
-kernel engine uptime_s memfree usb asof`. The Settings → Network and Chumby Info screens
-show them at the next render; without the file they show "?". Don't include values that
-change every minute (an uptime is fine at the companion's own pace, but each change
-re-renders those two screens).
+`key=value` lines, UTF-8, one per line. The Settings → Network and Chumby Info screens
+show them at the next render. A key that is missing, empty or malformed shows "?" (so
+does every row without the file); keys not in this table are ignored. Values are cut to
+80 characters, and control characters are dropped.
+
+| Key | Format (example) | Shown as |
+| --- | --- | --- |
+| `ssid` | the network's name (`Home WiFi`) | Network → Network |
+| `quality` | link quality, an integer 0-100 (`72`) | Network → Signal, with 0-4 bars; also Home's bars (all four when unknown) |
+| `signal` | signal level in dBm, an integer (`-61`) | Network → Signal (`-61 dBm, 72%`) |
+| `ap` | the access point's MAC (`aa:bb:cc:dd:ee:ff`) | Network → Access point |
+| `ip` | the Chumby's address (`192.0.2.20`) | Network → IP address |
+| `gateway` | the default route's gateway (`192.0.2.1`) | Network → Gateway |
+| `dns` | name servers, comma-separated (`192.0.2.1, 192.0.2.2`) | Network → DNS |
+| `mac` | the WiFi interface's MAC | Network → MAC address |
+| `rate` | the link's bit rate, as text (`54 Mb/s`) | Network → Link rate |
+| `hostname` | the Chumby's own name (`kitchen`) | Chumby Info → Name |
+| `firmware` | its firmware version (`1.7.3`) | Chumby Info → Firmware |
+| `kernel` | `uname -r` (`2.6.28-chumby`) | Chumby Info → Kernel, as `Linux 2.6.28-chumby` |
+| `engine` | the engine's version or build, free text (`neochumby 0.4.0`) | Chumby Info → Engine |
+| `uptime_s` | seconds since boot, an integer | Chumby Info → Uptime (`3 d 4 h 12 min`) |
+| `memfree` | `AVAILABLE TOTAL`, in kB (`41232 62000`) | Chumby Info → Memory (`40.3 MB available of 61 MB`) |
+| `usb` | `USED TOTAL` of the USB stick, in kB (`812000 3900000`) | Chumby Info → USB stick |
+| `asof` | when the Chumby reported these, free text (`7:30 PM, 28 Oct`) | the line under both screens: `As the Chumby reported at ...` |
+
+Chumby Info's last row, Feed, comes from the widgets (the weather's observation time),
+not from this file. Don't write values that change every minute: each change re-renders
+both screens and Home, and the Chumby fetches them again. Round `uptime_s` and
+`memfree` to the companion's own pace (say every ten minutes), and update `asof` only
+when you write the file.
 
 `refresh/` and `info/` are mode `2770` in neochumbyd's group, so the companion can write
 there.

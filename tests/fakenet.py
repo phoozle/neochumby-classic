@@ -1,8 +1,8 @@
 """fakenet: canned data for every source the renderer fetches, so a render runs offline.
 
 install(now) replaces urllib.request.urlopen with a function that answers each URL the
-widgets ask for (BOM's FTP XML, the news RSS and article pages, Yahoo's chart JSON, the
-logo hosts, SomaFM) with made-up data of the same shape, and refuses anything else. It
+widgets ask for (BOM's FTP XML, the news RSS and article pages, the Whyalla News feed,
+Yahoo's chart JSON, the logo hosts, SomaFM) with made-up data of the same shape, and refuses anything else. It
 also freezes the clock (datetime.now, date.today, time.time) at `now`, so two renders
 with the same data are byte-identical. Everything here is synthetic: no third-party
 content is stored in the repository.
@@ -164,6 +164,41 @@ def article(url, now):
             f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(doc)}</script></body></html>').encode()
 
 
+WN = "https://whyallanewsonline.com.au"
+
+
+def wordpress_feed(now):
+    """A WordPress RSS feed shaped like the Whyalla News one: most stories behind the
+    MemberPress paywall (only an excerpt, then a sign-in form), some in full ("In
+    Business"), one link off the site (must be skipped). Every item has a photo."""
+    ns = ('xmlns:content="http://purl.org/rss/1.0/modules/content/" '
+          'xmlns:dc="http://purl.org/dc/elements/1.1/"')
+    paywall = ('<div class="mepr-unauthorized-excerpt"><p>{lead} The council will say more next week. [&hellip;]</p></div>'
+               '<div class="mepr-unauthorized-message"><p>Subscribe or Login to see the rest of this story.</p></div>'
+               '<div class="mp_wrapper mp_login_form"><form method="post"><label>Username</label>'
+               '<input type="text" name="log"><button>Log In</button></form></div>')
+    full = ('<p>{lead}</p><h2>What happens next</h2>'
+            + "".join(f"<p>Paragraph {k + 1} of a made-up business story, long enough to wrap across a few lines on "
+                      f"the Chumby's little screen, so the reader needs a second page for it.</p>" for k in range(6))
+            + '<script>alert("never drawn")</script>'
+            + '<p>The post {title} appeared first on The Whyalla News.</p>')
+    items = []
+    for i in range(10):
+        title = HEADLINES[(i * 5) % len(HEADLINES)]
+        cat = ["News", "Sport", "In Business"][i % 3]
+        link = f"{WN}/{now:%Y/%m/%d}/story-{i}/" if i != 4 else f"https://elsewhere.example.com/story-{i}/"
+        pub = (now - dt.timedelta(hours=i * 7 + 2)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+        img = f"{WN}/wp-content/uploads/{now:%Y/%m}/photo-{i}-300x225.jpg"
+        lead = f"{title}, the story so far."
+        body = (full if cat == "In Business" else paywall).format(lead=lead, title=title)
+        items.append(f"<item><title>{title}</title><link>{link}</link><pubDate>{pub}</pubDate>"
+                     f"<dc:creator><![CDATA[Staff Reporter {i}]]></dc:creator><category><![CDATA[{cat}]]></category>"
+                     f'<description><![CDATA[<img width="300" height="225" src="{img}" /><p>{lead}</p>]]></description>'
+                     f"<content:encoded><![CDATA[{body}]]></content:encoded></item>")
+    return (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" {ns}><channel><title>The Whyalla News</title>'
+            f'{"".join(items)}</channel></rss>').encode()
+
+
 def yahoo_chart(url, now):
     path = urllib.parse.urlsplit(url).path
     sym = urllib.parse.unquote(path.rsplit("/", 1)[1])
@@ -221,6 +256,11 @@ def answer(url, now):
         return somafm(url)
     if "abc-cdn.net.au" in host:
         return picture(url)
+    if host == "whyallanewsonline.com.au":
+        if path == "/feed/":
+            return wordpress_feed(now)
+        if path.startswith("/wp-content/uploads/"):
+            return picture(url, 300, 225)
     if host == "www.abc.net.au":
         if path.endswith("rss.xml"):
             return rss(url, now)

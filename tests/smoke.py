@@ -11,6 +11,9 @@ published), so the run is the same everywhere. It checks that:
   - the output directory follows docs/interface.md: the manifest names only files that
     exist, with the sizes their directives say, hashes.txt covers them, version matches;
   - every widget put its pages in the slideshow, and every screen a tap can open exists;
+  - Whyalla News keeps to the paywall: a subscriber-only story shows only its excerpt and
+    a "Continue at" line, a full-text story its text, never a form, script or off-site link;
+  - Settings -> Network and Chumby Info show "?" for every fact the Chumby hasn't reported;
   - the engine's limits and the per-page memory budget hold;
   - a second render with the same data writes nothing at all (no file, no mtime);
   - a change re-renders only what it touches, and the version goes up;
@@ -90,7 +93,7 @@ def widgets_found():
         declared = tomllib.load(fh)["project"]["entry-points"][widget.GROUP]
     check(declared == widget.BUILTIN, "widget.BUILTIN matches pyproject.toml's entry points")
     ids = [a["id"] for a in config.registry()]
-    check(ids == ["weather", "news", "stocks", "photos", "aurora"], f"the five built-in widgets are found: {ids}")
+    check(ids == ["weather", "news", "whyallanews", "stocks", "photos", "aurora"], f"the six built-in widgets are found: {ids}")
     for a in config.registry():
         check(a["icon_path"] is not None, f"{a['id']} has an icon")
 
@@ -120,12 +123,12 @@ def renders(work, out, shots):
     lines = manifest(out)
     pages = [t for t in lines if t[0] == "page"]
     check(len(pages) == sum(s["pages"] for s in kept), f"{len(pages)} slideshow pages, as planned")
-    for app, prefix in (("weather", "weather_"), ("news", "news_slide_"), ("stocks", "stocks_"), ("photos", "photo"),
-                        ("aurora", "aurora_")):
+    for app, prefix in (("weather", "weather_"), ("news", "news_slide_"), ("whyallanews", "wn_slide"), ("stocks", "stocks_"),
+                        ("photos", "photo"), ("aurora", "aurora_")):
         check(any(t[2].startswith(prefix) for t in pages), f"{app} has a page")
     screens = {t[1] for t in lines if t[0] == "screen"}
     for want in ("home", "home_night", "settings", "timing", "network", "about", "configure", "music", "confirm",
-                 "stocks_list", "news_nat_l0"):
+                 "stocks_list", "news_nat_l0", "wn_l0", "wn_l0_night", "wn_s0_p0", "wn_s0_p0_night"):
         check(want in screens, f"screen {want}")
     targets = {t[-1] for t in lines if t[0] == "hot" and t[-2] == "screen"} | {t[2] for t in lines if t[0] == "pagetap"}
     check(targets <= screens, f"every screen a tap opens exists ({len(targets)})")
@@ -196,6 +199,63 @@ def renders(work, out, shots):
                           ("settings", preview.screen(out, "settings"))):
             img.resize((640, 480), resample=0).save(os.path.join(shots, f"{name}.png"), optimize=True)
         print(f"      screenshots in {shots}")
+
+
+# ---------------------------------------------------------------- Whyalla News and the paywall
+def whyalla(work, out):
+    import datetime as dt2
+    from neochumby_classic.widgets import whyallanews as wn
+    asked = [u for u in fakenet.REQUESTS if "whyallanewsonline" in u]
+    check(asked and all(u == wn.FEED or "/wp-content/uploads/" in u for u in asked),
+          f"whyallanews: fetches only the feed and its photos ({len(asked)} requests, all canned)")
+    items = wn.parse_feed(fakenet.wordpress_feed(NOW), 12)
+    check(len(items) == 9 and all(it["link"].startswith(f"https://{wn.SITE}/") for it in items),
+          "whyallanews: a link off the site is skipped")
+    walled = [it for it in items if it["paywalled"]]
+    full = [it for it in items if not it["paywalled"]]
+    check(walled and full and all(it["cat"] != "In Business" for it in walled) and all(it["cat"] == "In Business" for it in full),
+          f"whyallanews: {len(walled)} subscriber-only stories, {len(full)} in full")
+    w = walled[0]
+    text = " ".join(t for _, t in w["paras"])
+    check(len(w["paras"]) == 1 and text.endswith("…") and not any(x in text for x in ("Subscribe", "Login", "Username", "Log In")),
+          f"whyallanews: a paywalled story keeps only its excerpt: {text!r}")
+    f = full[0]
+    text = " ".join(t for _, t in f["paras"])
+    check(len(f["paras"]) == 8 and ("h", "What happens next") in f["paras"]
+          and "alert" not in text and "appeared first on" not in text,
+          "whyallanews: a full story keeps its text and heading, without the script or the 'appeared first on' line")
+    check(w["photo"] is None and w["img"].startswith(f"https://{wn.SITE}/wp-content/uploads/"), "whyallanews: photo links parsed")
+    pages = wn.layout_story(w, NOW, wn.MAX_STORY_PAGES)
+    check(len(pages) == 1 and pages[-1][-1][0] == "more" and pages[-1][-1][3] == "Continue at " + wn.SITE,
+          "whyallanews: a paywalled story is one page ending 'Continue at whyallanewsonline.com.au'")
+    pages = wn.layout_story(f, NOW, wn.MAX_STORY_PAGES)
+    check(1 < len(pages) <= wn.MAX_STORY_PAGES and all(op[0] != "more" or "The rest at" in op[3] for p in pages for op in p),
+          f"whyallanews: a full story runs to {len(pages)} pages, with no subscriber line")
+    lines = manifest(out)
+    story = {t[1] for t in lines if t[0] == "screen" and t[1].startswith("wn_s")}
+    check(len(story) >= 2 * len(items[:8]), f"whyallanews: {len(story)} story screens, light and night")
+    check(not any(f.startswith(".wncache") for f in os.listdir(out)), "whyallanews: caches stay out of the render")
+    check(dt2.datetime.now(NOW.tzinfo) == NOW, "the clock is still frozen")
+
+
+# ---------------------------------------------------------------- Settings -> Network and Chumby Info
+def chumby_info(work):
+    from neochumby_classic import render, screens
+    rows = screens.network_rows(render.chumby_info(None, {})) + screens.about_rows(render.chumby_info(None, {}))
+    check(all(v == "?" for _, v in rows), "info: without the file, every row shows '?'")
+    path = os.path.join(work, "info-kitchen")
+    with open(path, "w") as fh:
+        fh.write("ssid=Home WiFi\nquality=lots\nsignal=-61\nmemfree=12\nfeed=spoofed\nbogus=1\nengine=\nasof=19:30\n")
+    info = render.chumby_info(path, {"feed": "weather of 28 Oct"})
+    net, about = dict(screens.network_rows(info)), dict(screens.about_rows(info))
+    check(net["Network"] == "Home WiFi" and net["Signal"] == "-61 dBm" and net["IP address"] == "?",
+          f"info: reported keys show, missing ones '?' {net}")
+    check(about["Memory"] == "?" and about["Engine"] == "?" and about["Feed"] == "weather of 28 Oct" and "bogus" not in info,
+          f"info: malformed, empty and unknown keys are ignored {about}")
+    check(screens.signal_level(info) == 4 and screens.signal_level({"quality": "40"}) == 2,
+          "info: Home's bars follow the link quality, all four when it's unknown")
+    keys = re.findall(r"`([a-z_]+)`", open(os.path.join(ROOT, "docs", "interface.md")).read().split("## Facts from the Chumby")[1])
+    check(set(render.INFO_KEYS) <= set(keys), f"info: docs/interface.md documents every key {sorted(set(render.INFO_KEYS) - set(keys))}")
 
 
 # ---------------------------------------------------------------- the renderer service
@@ -395,6 +455,8 @@ def main():
     os.environ["NEOCHUMBY_CLASSIC_ASSETS"] = ""                # the placeholders, as published
     widgets_found()
     renders(work, out, a.screenshots)
+    whyalla(work, out)
+    chumby_info(work)
     service(work)
     web(work, out)
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")

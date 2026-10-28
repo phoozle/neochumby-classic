@@ -30,6 +30,7 @@ from . import assets, config, output, qrscreen, screens, widget
 
 W, H = widget.W, widget.H
 FILE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,62}")
+SCREEN_OK = re.compile(r"[A-Za-z0-9_]{1,23}")   # the engine reads screen names into 24 bytes, "_night" included
 PRUNE_AFTER = 3600            # unnamed files and stale temp files older than this are removed
 # The engine's limits (MAXP, MAXSCR, ... on the Chumby). A render over one
 # of them is cut by the engine, so it is refused here instead (docs/widgets.md).
@@ -73,12 +74,17 @@ def sun_lines(now, lat, lon, days=8):
 
 
 # ---------------------------------------------------------------- Settings -> Chumby Info
+# The keys of <state>/info/<chumby> (docs/interface.md, "Facts from the Chumby"). Other keys
+# are ignored, and a missing or empty one shows "?".
+INFO_KEYS = ("ssid", "ap", "rate", "signal", "quality", "ip", "mac", "gateway", "dns", "hostname", "firmware",
+             "kernel", "engine", "uptime_s", "memfree", "usb", "asof")
+
+
 def chumby_info(path, facts):
-    """Facts about the Chumby for Settings -> Network and Chumby Info, from a key=value file
-    (ssid, ap, rate, signal, quality, ip, mac, gateway, dns, hostname, firmware, kernel,
-    uptime_s, memfree "AVAIL TOTAL" in kB, usb "USED TOTAL" in kB, asof), plus the widgets'
-    facts (the weather's observation time, as Feed). Nothing writes that file yet: the
-    Chumby could report these over its session in future. Without it they show "?".
+    """Facts about the Chumby for Settings -> Network and Chumby Info (and Home's signal
+    bars), from a key=value file with the INFO_KEYS, plus the widgets' facts (the weather's
+    observation time, as Feed). neochumby's companion is to write that file from the
+    Chumby's session; nothing writes it yet. Without it, or a key, the row shows "?".
     No fact may change on every render: that would make the screen new every time."""
     info = dict(facts)
     if not path:
@@ -90,7 +96,12 @@ def chumby_info(path, facts):
         print(f"chumby info: {e}", file=sys.stderr)
         return info
     raw = {k.strip(): "".join(ch for ch in v if ch.isprintable()).strip()[:80] for k, v in raw.items()}
-    info.update({k: v for k, v in raw.items() if v})
+    raw = {k: v for k, v in raw.items() if k in INFO_KEYS and v}
+    if not raw.get("quality", "").isdigit():               # a percentage, 0-100
+        raw.pop("quality", None)
+    if not re.fullmatch(r"-?[0-9]{1,3}", raw.get("signal", "")):   # dBm
+        raw.pop("signal", None)
+    info.update({k: v for k, v in raw.items() if k not in ("uptime_s", "memfree", "usb", "asof")})
     try:
         up = int(raw["uptime_s"])
         d, h, m = up // 86400, up % 86400 // 3600, up % 3600 // 60
@@ -148,6 +159,12 @@ def check_lines(app, r, first, out):
                 raise WidgetError(f"{app}: {t[0]} for a page that isn't its own: {ln}")
         if "\n" in ln or len(ln) > 1000:
             raise WidgetError(f"{app}: bad line")
+        names = [t[1]] if t[0] in ("screen", "pane", "hot", "slider") and len(t) > 1 else []
+        names += [t[2]] if t[0] == "pagetap" and len(t) > 2 else []
+        names += [t[-1]] if t[0] == "hot" and len(t) > 2 and t[-2] == "screen" else []
+        bad = [n for n in names if not SCREEN_OK.fullmatch(n)]
+        if bad:
+            raise WidgetError(f"{app}: screen name {bad[0]!r} isn't 1-23 letters, digits or '_'")
         for tok in t:
             if tok.endswith((".raw", ".l8", ".path")):
                 if not FILE_OK.fullmatch(tok):
@@ -337,9 +354,10 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
     # Home (top button), Settings and the Music app
     app_titles, app_thumbs = [n for n, _ in apps], [thumbs[pg] for _, pg in apps]
     write = output.rgb565
-    man += screens.home(out, write, app_titles, app_thumbs)
-    man += screens.home(out, write, app_titles, app_thumbs, night=True)    # dark theme, shown in night mode
     info = chumby_info(info_path, facts)
+    bars = screens.signal_level(info)                      # Home's bars match Settings > Network
+    man += screens.home(out, write, app_titles, app_thumbs, signal=bars)
+    man += screens.home(out, write, app_titles, app_thumbs, night=True, signal=bars)   # dark theme, shown in night mode
     man += screens.settings(out, write, info)
     man += screens.settings(out, write, info, night=True)
     url = g["config_url"]                                  # Settings -> APPS: the QR code for the web page

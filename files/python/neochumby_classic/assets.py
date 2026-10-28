@@ -11,6 +11,7 @@ separated by ':'). Those directories are searched first. The names the widgets l
   weather-badge.png    the weather pages' badge, top left (RGBA)
   raysclip.png         the aurora's light-ray clip (tools/raysclip.py makes it from a video)
   abc-logo.png, abc-swirls.png   the news header's logo and swirls (news.py make_assets)
+  whyallanews-wordmark.png       Whyalla News' masthead wordmark (alpha mask, recoloured per theme)
 """
 import os
 

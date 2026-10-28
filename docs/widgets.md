@@ -1,11 +1,11 @@
 # The widget API, version 1
 
-A **widget** is one app in a Chumby's channel: Weather, ABC News, Stock Quotes, Photos,
-the Aurora screensaver. Each is a Python module that draws its pages and screens as
+A **widget** is one app in a Chumby's channel: Weather, ABC News, Whyalla News, Stock
+Quotes, Photos, the Aurora screensaver. Each is a Python module that draws its pages and screens as
 pictures, ahead of time, on the server. The Chumby only copies those pictures to its
 screen. This page is everything a widget needs to know.
 
-The five built-in widgets live in [`files/python/neochumby_classic/widgets/`](../files/python/neochumby_classic/widgets/)
+The six built-in widgets live in [`files/python/neochumby_classic/widgets/`](../files/python/neochumby_classic/widgets/)
 and are found exactly as an outside widget would be: through an entry point.
 
 ## Versioning
@@ -177,7 +177,11 @@ memory. So:
 
 - **Stable names.** The same picture gets the same name every render: name by slot
   (`stocks_d2.raw`, `news_nat_s1_p0.raw`), never by content, time or a counter. Start
-  every name with the widget's id (`clock_time.raw`, screen `clock_settings`).
+  every name with the widget's id (`clock_time.raw`, screen `clock_settings`), or a
+  short form of it when the id is long (Whyalla News uses `wn_`).
+- **Short screen names.** A screen name is 1-23 letters, digits and `_`, its `_night`
+  copy's included (the engine keeps 24 bytes for it), so keep the day name to 17. File
+  names may be up to 63 characters. The renderer refuses a longer screen name.
 - **Write if changed.** Write through `ctx.write565` / `ctx.write`. They leave an
   identical file alone and replace a changed one atomically (interface.md).
 - **No per-run times in big files.** A clock reading "rendered 7:42" or an age like "3 min
@@ -203,7 +207,7 @@ memory. So:
   | `glow` layers / `glowseq` clips | 16 / 4 (1000 frames each) |
   | stations | 16 |
 
-  With every built-in widget on, a channel uses 14 pages, 75 screens, 21 panes and 375 hot zones.
+  With every built-in widget on, a channel uses 16 pages, 107 screens, 19 panes and 481 hot zones.
 - **Untrusted content stays pixels.** Text and pictures from the internet are only ever
   drawn. Names, directives and paths never come from fetched content.
 - **Fetch politely.** Send `ctx.user_agent`, use timeouts, cache in `ctx.state_dir`, and

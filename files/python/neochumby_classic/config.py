@@ -87,7 +87,7 @@ MAXP = 48                      # the engine's slideshow page limit (MAXP on the 
 # in the registry but switched off in a fresh config: an empty photo library has nothing
 # to show, and its pages would crowd the slideshow.
 DEFAULT_OFF = {"photos"}
-ORDER = ["weather", "news", "stocks", "photos", "aurora"]   # default play order of whatever exists
+ORDER = ["weather", "news", "whyallanews", "stocks", "photos", "aurora"]   # default play order of whatever exists
 IMAGE_ID = r"[A-Za-z0-9_-]{1,64}"
 CHUMBY_NAME = r"[a-z0-9_-]{1,32}"                           # neochumbyd's names for Chumbys
 CHANNEL_ID = r"[a-z0-9_-]{1,24}"

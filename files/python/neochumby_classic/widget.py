@@ -111,6 +111,7 @@ BUILTIN = {
     "photos": "neochumby_classic.widgets.photos",
     "stocks": "neochumby_classic.widgets.stocks",
     "weather": "neochumby_classic.widgets.weather",
+    "whyallanews": "neochumby_classic.widgets.whyallanews",
 }
 
 

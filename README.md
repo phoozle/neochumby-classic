@@ -1,7 +1,7 @@
 # neochumby-classic
 
 The classic Chumby experience for [neochumby](https://github.com/johnmerchant/neochumby):
-a 90s weather channel, ABC News, stock quotes, your photos and a Vista-style aurora
+a 90s weather channel, ABC News, the Whyalla News, stock quotes, your photos and a Vista-style aurora
 screensaver, with Home, Settings and Music screens, and a "my channels" web page modelled
 on chumby.com's.
 
@@ -139,6 +139,7 @@ You can also use pictures of your own: put them in `/etc/neochumby-classic/asset
 | `weather-badge.png` | the weather pages' badge, top left (RGBA) | a drawn sun and cloud |
 | `raysclip.png` | the aurora's light rays | no rays |
 | `abc-logo.png`, `abc-swirls.png` | the news header | a plain NEWS mark |
+| `whyallanews-wordmark.png` | Whyalla News' masthead (its alpha is the mask, recoloured per theme) | the paper's name in Liberation Sans Bold |
 
 - `raysclip.png` is made from a video with [`tools/raysclip.py`](tools/raysclip.py)
   (needs ffmpeg and numpy).
@@ -155,16 +156,18 @@ your own home, and certainly before anyone redistributes what it draws.
 | Source | Used by | To check |
 | --- | --- | --- |
 | Bureau of Meteorology, anonymous FTP (`ftp.bom.gov.au/anon/gen/fwo/`) | Weather, the ticker | BOM's copyright and data terms for display and redistribution. Its website blocks scrapers; the FTP products are the sanctioned route |
-| ABC News RSS, and ABC article pages (`abc.net.au`) | News, the ticker | ABC's RSS terms (personal, non-commercial use). The Eyre Peninsula page and the article bodies are **scraped**, which the terms may not allow |
+| ABC News RSS, and ABC article pages (`abc.net.au`) | News | ABC's RSS terms (personal, non-commercial use). The Eyre Peninsula page and the article bodies are **scraped**, which the terms may not allow |
+| The Whyalla News' WordPress RSS feed (`whyallanewsonline.com.au/feed/`) and the photos it links | Whyalla News | The paper's terms. The widget reads only the RSS feed (the site refuses scripts, and it doesn't try to get round that) and **respects the paywall**: a subscriber-only story shows only the free excerpt the feed carries, ending "Continue at whyallanewsonline.com.au"; full text only where the feed itself carries it |
 | Yahoo Finance's chart endpoint (`query1.finance.yahoo.com/v8/finance/chart`) | Stocks | Unofficial and undocumented. Yahoo's terms allow personal use, not redistribution |
 | financialmodelingprep.com, assets.parqet.com | Stock logos | Unofficial. The logos are the companies' trademarks; they are fetched and cached on your server, never committed |
 | SomaFM's API and streams | Music | SomaFM's terms for its API and channel artwork |
 
-The weather defaults to Whyalla, South Australia, only as an example.
+The weather defaults to Whyalla, South Australia, only as an example. Whyalla News is that
+town's paper: switch it off on the web page if it isn't yours.
 
 ## Widgets
 
-The five widgets are plugins, found through Python entry points, exactly as a widget from
+The six widgets are plugins, found through Python entry points, exactly as a widget from
 another repository would be. [docs/widgets.md](docs/widgets.md) is the widget API
 (version 1): what a widget declares, what it may draw, the rules that keep the Chumby fast
 (stable names, write only what changed, no per-render times, a memory budget per page,

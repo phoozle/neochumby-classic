@@ -6,15 +6,14 @@ Pages (each with a dark copy for night mode):
                                                      vertically, 0xF81F = transparent)
 and, for the whole slideshow, the clock and the ticker the engine draws over these pages:
   clock.raw, clock_night.raw     glyph cells for "0123456789: APM", on the header background
-  ticker.raw, ticker_night.raw   a long 24 px strip the engine scrolls: the weather now, today's
-                                 forecast and (optionally) some headlines
+  ticker.raw, ticker_night.raw   a long 24 px strip the engine scrolls: the weather now and the
+                                 next three days' forecasts (weather only: news has its own apps)
 
 BOM's website blocks scrapers and points to its anonymous FTP, so observations and forecasts
 come from there, by product id (the options below).
 """
 import datetime as dt
 import math
-import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -25,7 +24,7 @@ from ..widget import Rendered
 
 API = 1
 APP = {"id": "weather", "name": "Weather", "icon": "icons/weather.png", "seconds": 12,
-       "description": "Weather from the Bureau of Meteorology for the place you set, with the scrolling news ticker.",
+       "description": "Weather from the Bureau of Meteorology for the place you set, with a scrolling weather ticker.",
        "subslides": [{"id": "current", "label": "Current Conditions", "default": True},
                      {"id": "local", "label": "Local Forecast", "default": True},
                      {"id": "extended", "label": "Extended Forecast", "default": True}]}
@@ -46,8 +45,6 @@ CONFIG_SCHEMA = [
      "max_len": 8, "pattern": r"ID[A-Z][0-9]{5}", "help": "The state's town forecasts XML (South Australia: IDS10044)."},
     {"key": "forecast_area", "type": "string", "label": "Forecast area (aac)", "default": "SA_PT055",
      "max_len": 10, "pattern": r"[A-Z]{2,3}_[A-Z]{2}[0-9]{3}", "help": "The place's aac in that product."},
-    {"key": "ticker_headlines", "type": "bool", "label": "Headlines in the ticker", "default": True,
-     "help": "ABC News headlines after the weather in the scrolling ticker."},
 ]
 
 W, H = 320, 240
@@ -55,9 +52,6 @@ UA = config.USER_AGENT
 # The place: the widget's options, applied by set_location() before anything is drawn.
 BOM_FTP = "ftp://ftp.bom.gov.au/anon/gen/fwo/{}.xml"
 LOC = {}
-# The ticker's headlines (examples: ABC Adelaide and ABC Just In)
-NEWS_URLS = ["https://www.abc.net.au/news/feed/8057540/rss.xml",
-             "https://www.abc.net.au/news/feed/51120/rss.xml"]
 KEY = (255, 0, 255)                                                     # sprite colour key (0xF81F)
 
 # Bundled open fonts, metric-compatible with the Arial the pages were designed in, so every
@@ -178,22 +172,6 @@ def get_forecast():
                 days.append(v)
             return days
     return []
-
-
-def get_news(limit=8):
-    seen, out = set(), []
-    for url in NEWS_URLS:
-        try:
-            ch = ET.fromstring(fetch(url)).find("channel")
-        except Exception as e:  # one dead feed must not kill the page
-            print("news feed failed:", url, e, file=sys.stderr)
-            continue
-        for it in ch.findall("item"):
-            t = (it.findtext("title") or "").strip()
-            if t and t not in seen:
-                seen.add(t)
-                out.append(t)
-    return out[:limit]
 
 
 # ---------------------------------------------------------------- drawing helpers
@@ -425,12 +403,17 @@ def clock_cells(now):
     return sheet, cw, ch, widths
 
 
-def ticker_strip(obs, fc, news):
+def ticker_strip(obs, fc):
+    """The weather pages' crawl: weather only (news lives in the news apps)."""
     f = font(14)
-    parts = [f"{LOC['name'].upper()} NOW {obs.get('air_temp', '--')}°C  {obs.get('wind_dir', '')} {obs.get('wind_spd_kmh', '--')} km/h"]
-    if fc:
-        parts.append(f"TODAY: {fc[0].get('precis', '')} Max {fc[0].get('air_temperature_maximum', '--')}°")
-    parts += [h.upper() for h in news]
+    parts = [f"{LOC['name'].upper()} NOW {obs.get('air_temp', '--')}°C  {obs.get('wind_dir', '')} {obs.get('wind_spd_kmh', '--')} km/h",
+             f"HUMIDITY {obs.get('rel_hum', '--')}%  GUSTS {obs.get('gust_kmh', '--')} km/h"]
+    for k, day in enumerate(fc[:3]):
+        name = "TODAY" if k == 0 else day["date"].strftime("%A").upper()
+        lo, hi = day.get("air_temperature_minimum"), day.get("air_temperature_maximum")
+        lo, hi = (None if v in ("", "--", None) else v for v in (lo, hi))   # BOM drops today's max at night
+        temps = f"  {lo}° / {hi}°" if lo and hi else f"  MAX {hi}°" if hi else f"  MIN {lo}°" if lo else ""
+        parts.append(f"{name}: {day.get('precis', '').rstrip('.').upper()}{temps}")
     text = "     •     ".join(parts) + "     •     "
     wpx = int(f.getlength(text)) + W
     img = Image.new("RGB", (wpx, TICKER_H))
@@ -455,7 +438,6 @@ def render(ctx):
     set_location(ctx.options)
     now = ctx.now
     obs, fc = get_obs(), get_forecast()
-    news = get_news() if ctx.options.get("ticker_headlines", True) else []
     r = Rendered(home_title=f"{LOC['name']} Weather")
     p = ctx.first_page
     for sid, _pages in ctx.slides:
@@ -479,14 +461,14 @@ def render(ctx):
     clk, cw, ch, widths = clock_cells(now)
     ctx.write565(clk, "clock.raw")
     r.lines.append(f"clock clock.raw {cw} {ch} {CLOCK_R} {CLOCK_Y} " + " ".join(map(str, widths)))
-    tk = ticker_strip(obs, fc, news)
+    tk = ticker_strip(obs, fc)
     ctx.write565(tk, "ticker.raw")
     r.lines.append(f"ticker ticker.raw {tk.size[0]} {TICKER_H} {TICKER_Y} 2")
     # the same glyphs and strip on the night header and ticker band (same sizes: the engine
     # checks), used on the pages drawn from their pagenight
     set_theme("night")
     nclk, ncw, nch, nwidths = clock_cells(now)
-    ntk = ticker_strip(obs, fc, news)
+    ntk = ticker_strip(obs, fc)
     set_theme("day")
     if (ncw, nch, nwidths) == (cw, ch, widths) and ntk.size == tk.size:
         ctx.write565(nclk, "clock_night.raw")

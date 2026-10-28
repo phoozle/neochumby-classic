@@ -279,7 +279,7 @@ BTN_R = 17
 TOGGLES = {"night": "night", "pin": "pin"}   # action -> state variable; greyed when off, normal when on
 
 
-def home_background():
+def home_background(level=4):
     img = Image.new("RGB", (W * SS, H * SS))
     d = ImageDraw.Draw(img)
     grad(d, (0, 0, W * SS, H * SS), T["bg_top"], T["bg_bot"])
@@ -291,8 +291,8 @@ def home_background():
     d.text((24 * SS, 4 * SS), "Slideshow", font=f(VERDB, 10), fill=T["text"])
     paste_logo(img, 12 * SS, 10 * SS, 14 * SS)
     for i in range(4):                                             # signal bars, as on the real panel
-        x = (296 + i * 4) * SS
-        d.rectangle([x, (14 - i * 2) * SS, x + 2 * SS, 15 * SS], fill=(60, 160, 70))
+        x = (296 + i * 4) * SS                                     # (the same level as Settings > Network)
+        d.rectangle([x, (14 - i * 2) * SS, x + 2 * SS, 15 * SS], fill=(60, 160, 70) if i < level else T["frame2"])
     # left card frame (dashed, rounded) where the app thumbnail sits
     x0, y0, x1, y1 = 22 * SS, 52 * SS, 176 * SS, 168 * SS
     d.rounded_rectangle([x0, y0, x1, y1], radius=14 * SS, outline=T["frame1"], width=SS)
@@ -315,7 +315,7 @@ def home_background():
     return small(big_out.convert("RGB"))
 
 
-def home(out, rgb565, page_titles, page_thumbs, night=False):
+def home(out, rgb565, page_titles, page_thumbs, night=False, signal=4):
     """Home screen files + manifest lines. page_titles/page_thumbs: one per app in the channel (its name
     and its first page as a 320x240 PIL image); the card follows the engine's "app" (pageapp lines).
     night=True renders the dark theme as screen "home_night"; the engine shows it while night mode is on."""
@@ -323,7 +323,7 @@ def home(out, rgb565, page_titles, page_thumbs, night=False):
     T = NIGHT if night else LIGHT
     sfx = "_night" if night else ""
     scr = "home" + sfx
-    bg = home_background()
+    bg = home_background(signal)
     rgb565(bg, f"{out}/{scr}.raw")
     lines = [f"screen {scr} {scr}.raw"]
     # left card: app title, "n of N", arrows and a thumbnail, one frame per app
@@ -560,9 +560,9 @@ SET_BTNS = [  # (label, icon, cx, cy, action)
     ("CHUMBY INFO", "octo", 64, 86, "screen about"),
     ("SLIDESHOW", "clock", 160, 86, "screen timing"),
     ("NETWORK", "wifi", 256, 86, "screen network"),
-    ("STAY", "pin", 64, 168, "pin"),
-    ("NIGHT", "moon", 160, 168, "nightmode"),             # cycles auto -> on -> off (state nightmode)
-    ("APPS", "qr", 256, 168, "screen configure"),          # QR code for the config web page (qrscreen.py)
+    ("NIGHT", "moon", 112, 168, "nightmode"),             # cycles auto -> on -> off (state nightmode)
+    ("APPS", "qr", 208, 168, "screen configure"),          # QR code for the web page (qrscreen.py)
+    # no STAY here: on the stock Chumby it lives on Home's slideshow controls only
 ]
 DONE_BOX = (248, 206, 308, 230)
 # Settings' toggle-looking buttons: action -> the state variable that lights them. NIGHT here
@@ -650,8 +650,9 @@ def settings(out, rgb565, info, night=False):
         frs.append(on_bg(crop, im))
     lines += sheet_pane(out, rgb565, frs, f"{scr}_secs", scr, vx, vy, "secs")
     # the night mode, under NIGHT (the same place and look as the timing under SLIDESHOW)
-    vx = 160 - vw // 2
-    vy = 168 + (vy - 86)
+    nx, ny = next((cx, cy) for _, _, cx, cy, act in SET_BTNS if act == "nightmode")
+    vx = nx - vw // 2
+    vy = ny + (vy - 86)
     crop = bg.crop((vx, vy, vx + vw, vy + vh))
     frs = []
     for label in NIGHT_MODES:
@@ -689,7 +690,7 @@ def timing_screen(out, rgb565, sfx):
     for kind, cx in (("minus", 46), ("plus", 274)):
         glossy_button(d, cx * SS, 112 * SS, SET_R * SS)
         icon(d, kind, cx * SS, 112 * SS, SET_R * SS * 1.1)
-    d.text((160 * SS, 180 * SS), "Tap STAY in Settings to stop on one page", font=f(VERD, 7), fill=T["hint"], anchor="mm")
+    d.text((160 * SS, 180 * SS), "Tap STAY on Home to stop on one page", font=f(VERD, 7), fill=T["hint"], anchor="mm")
     done_pill(d)
     big_out = big(small(img)).convert("RGBA")
     for label, cx in (("SHORTER", 46), ("LONGER", 274)):
@@ -715,6 +716,14 @@ def timing_screen(out, rgb565, sfx):
     lines += [f"hot {scr} 14 74 66 72 secs_down", f"hot {scr} 240 74 66 72 secs_up",
               f"hot {scr} {DONE_BOX[0] - 6} {DONE_BOX[1] - 6} {DONE_BOX[2] - DONE_BOX[0] + 12} 40 screen settings"]
     return lines
+
+
+def signal_level(info):
+    """WiFi link quality (0-100) as 0-4 bars; 4 when unknown. Home and Settings > Network both use it."""
+    try:
+        return min(4, max(0, (int(info["quality"]) + 12) // 25))
+    except (KeyError, TypeError, ValueError):
+        return 4
 
 
 def signal_bars(d, x, y, level, col, off):
@@ -754,7 +763,7 @@ def info_screen(out, rgb565, scr, title, kind, rows, info):
         d.text(((x0 + 10) * SS, y), label, font=lf, fill=T["sub"], anchor="lm")
         vx = x0 + 100
         if label == "Signal" and info.get("quality", "").isdigit():
-            signal_bars(d, vx, y / SS + 5, min(4, (int(info["quality"]) + 12) // 25), (60, 160, 70), T["frame2"])
+            signal_bars(d, vx, y / SS + 5, signal_level(info), (60, 160, 70), T["frame2"])
             vx += 22
         while vf.getlength(value) > (x1 - 10 - vx) * SS and len(value) > 4:
             value = value[:-2] + "…"
