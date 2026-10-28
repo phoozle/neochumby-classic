@@ -19,6 +19,8 @@ published), so the run is the same everywhere. It checks that:
     or chosen; the sun times from the station; old options migrated; renders that change
     nothing write nothing;
   - limits.py and docs/widgets.md's table of the engine's limits agree;
+  - Home -> APPS: a page of tiles per six apps in a made-up neochumbyd tree, each opening
+    its app ("app NAME"), paged, without classic, home or apps that can't be opened;
   - the engine's limits and the per-page memory budget hold;
   - a second render with the same data writes nothing at all (no file, no mtime);
   - a change re-renders only what it touches, and the version goes up;
@@ -389,6 +391,62 @@ def chumby_info(work, out):
           "live: the preview draws the values in their boxes")
 
 
+# ---------------------------------------------------------------- Home -> APPS
+def apps_screen(work):
+    from PIL import Image
+    from neochumby_classic import appsscreen, config, render
+
+    def fake_tree(n):
+        root = os.path.join(work, f"tree{n}")
+        for k in range(n):
+            d = os.path.join(root, "apps", f"game{k:02d}")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "manifest"), "w") as fh:
+                fh.write(f"title=GAME {k}\nexec=neochumby-game{k}\n" + ("colour=dc281e\n" if k % 2 else ""))
+        for name, man in (("classic", "title=Classic\nexec=neochumby-classic\nstart=true\n"),
+                          ("home", "title=Apps\nexec=neochumby-home\nstart=true\n"),
+                          ("airplay", "title=AirPlay\nservice=neochumby-airplay\n"),        # no exec: can't be opened
+                          ("Bad Name", "title=Bad\nexec=x\n")):
+            os.makedirs(os.path.join(root, "apps", name), exist_ok=True)
+            with open(os.path.join(root, "apps", name, "manifest"), "w") as fh:
+                fh.write(man)
+        Image.new("RGBA", (64, 64), (40, 200, 90, 255)).save(os.path.join(root, "apps", "game00", "icon.png"))
+        return root
+
+    cfg = config.default_config()
+    for e in config.channel(cfg)["apps"]:
+        e["enabled"] = False
+    for n, pages in ((3, 1), (7, 2), (12, 2)):
+        os.environ["NEOCHUMBY_TREE"] = fake_tree(n)
+        apps = appsscreen.full_apps()
+        check(sorted(a["name"] for a in apps) == [f"game{k:02d}" for k in range(n)] and apps[0]["icon"],
+              f"apps: {n} apps from the tree, without classic, home, one with no exec or a bad name")
+        out = os.path.join(work, "apps", str(n))
+        render.render(out, cfg, "kitchen", now=NOW)
+        lines = manifest(out)
+        screens = {t[1] for t in lines if t[0] == "screen"}
+        want = {f"apps_p{p}{sfx}" for p in range(pages) for sfx in ("", "_night")}
+        check(want <= screens and f"apps_p{pages}" not in screens, f"apps: {n} apps on {pages} page(s), with night copies")
+        hots = [t for t in lines if t[0] == "hot" and t[1].startswith("apps_p")]
+        opened = [t[7] for t in hots if t[6] == "app"]
+        check(sorted(opened) == sorted([a["name"] for a in apps] * 2) and all(re.fullmatch(r"[a-z0-9_-]{1,32}", a) for a in opened),
+              f"apps: every tile opens its app ('app NAME'), day and night ({len(opened)})")
+        targets = {t[7] for t in hots if t[6] == "screen"}
+        check(targets == {f"apps_p{p}" for p in range(pages)} | {"home"} if pages > 1 else targets == {"home"},
+              f"apps: PREV / NEXT between pages, DONE to Home {sorted(targets)}")
+        check(render.problems([" ".join(t) for t in lines], out) == [], "apps: every line is one the engine takes")
+        before = snapshot(out)
+        time.sleep(0.05)
+        changed = render.render(out, cfg, "kitchen", now=NOW)
+        diff = sorted(f for f, v in snapshot(out).items() if before.get(f) != v)
+        check(not changed and not diff, f"apps: a second render writes nothing {diff[:5]}")
+    home = [t for t in lines if t[0] == "hot" and t[1] == "home" and t[-2:] == ["screen", "apps_p0"]]
+    check(len(home) == 1, "apps: Home's APPS opens them")
+    check(any(t[0] == "hot" and t[1] == "settings" and t[-2:] == ["screen", "configure"] for t in lines),
+          "apps: Settings still leads to the web page's QR code")
+    os.environ.pop("NEOCHUMBY_TREE")
+
+
 # ---------------------------------------------------------------- the renderer service
 def service(work):
     from neochumby_classic import service as svc
@@ -593,6 +651,7 @@ def main():
     renders(work, out, a.screenshots)
     whyalla(work, out)
     weather_places(work)
+    apps_screen(work)
     chumby_info(work, out)
     service(work)
     web(work, out)

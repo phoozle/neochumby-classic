@@ -1,4 +1,4 @@
-"""qrscreen: Settings -> APPS on the Chumby. A big QR code for the web page
+"""qrscreen: Settings -> WEB PAGE on the Chumby. A big QR code for the web page
 (web.py), the address under it, and BACK, in the Settings sub-screen style.
 
     lines = qrscreen.configure(out, rgb565, url)               # screen "configure"

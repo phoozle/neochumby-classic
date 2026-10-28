@@ -117,6 +117,23 @@ The companion (or anything in neochumbyd's group) can ask:
 Otherwise each Chumby is rendered when it first appears, then every
 `NEOCHUMBY_CLASSIC_EVERY` seconds (default 600).
 
+## Home → APPS
+
+Home's APPS button opens screen `apps_p0` (and `apps_p1`, ... six apps a page, each with a
+`_night` copy): a tile for every app in neochumbyd's tree (`$NEOCHUMBY_TREE`, else
+`$NEOCHUMBY_CLASSIC_TREE`) whose `apps/<name>/manifest` has a `title` and an `exec`, except
+`classic` and `home`. A tile shows the app's `icon.png` (from its `files/`), or its initial on
+its `colour`, and its title in that colour. A tap on it is a hot zone with the engine's action
+`app <name>`, which the engine sends to the session as `open <name>`. The list is read at
+every render, so a new app shows at the next one.
+
+For neochumby's emulator CI (`dev/emulate`'s classic scenario, johnmerchant/neochumby#28):
+this screen replaces the `app doom` hot zone that scenario injects into Settings. Tap Home's
+APPS (`hot home ... screen apps_p0`), then the DOOM tile (`hot apps_p0 ... app doom`).
+
+Settings' WEB PAGE button (formerly APPS) still opens the QR code for the web page
+(`configure`).
+
 ## Facts from the Chumby
 
 The Chumby reads most of what Settings → Network and Chumby Info show itself, and draws it

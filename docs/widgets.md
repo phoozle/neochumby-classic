@@ -163,7 +163,8 @@ manifest by their file name only.
 Actions: `slideshow` (back to the slideshow, to the page a `pagetap` came from),
 `screen NAME`, `chumby` (leave for the stock Chumby software), `music_toggle`,
 `station N`, `next_station`, `night`, `nightmode`, `pin`, `next_app`, `prev_app`,
-`secs_up`, `secs_down`. State variables for panes: `music`, `station`, `night`,
+`secs_up`, `secs_down`, `app NAME` (open neochumby app NAME full screen: the engine asks the
+session to `open` it, and the session refuses an app it doesn't have). State variables for panes: `music`, `station`, `night`,
 `nightmode`, `pin`, `secs`, `app`, and the live values `wifi` (0-4 bars) and `wifi_pct`.
 
 ### Live values

@@ -216,6 +216,12 @@ def icon(d, kind, cx, cy, s, col=None, muted=False):
         for k in (1, 2, 3):
             rr = s * .15 * k
             d.arc([cx - rr, cy + s * .27 - rr, cx + rr, cy + s * .27 + rr], 225, 315, fill=col, width=w)
+    elif kind == "grid":                                           # APPS: three by three tiles
+        u = s * .2
+        for gx in (-1, 0, 1):
+            for gy in (-1, 0, 1):
+                x, y = cx + gx * u * 1.25, cy + gy * u * 1.25
+                d.rounded_rectangle([x - u / 2, y - u / 2, x + u / 2, y + u / 2], radius=u * .25, fill=col)
     elif kind == "qr":
         from . import qrscreen                                            # lazy: qrscreen imports this module
         qrscreen.qr_icon(d, cx, cy, s * .62, col)
@@ -274,7 +280,7 @@ HOME_BTNS = [  # (label, icon, cx, cy, action)
     ("NIGHT", "moon", 228, 140, "night"),
     ("MUSIC", "note", 284, 140, "screen music"),
     ("SETTINGS", "wrench", 228, 198, "screen settings"),
-    ("ALARMS", "bell", 284, 198, "none"),                     # as on the real Chumby (not wired up)
+    ("APPS", "grid", 284, 198, "screen apps_p0"),             # the neochumby apps (appsscreen.py); ALARMS here on the real one
 ]
 HOME_BOTTOM = [("STAY", "pin", 32, 214, "pin"), ("NEXT", "next", 84, 214, "next_app"), ("CHUMBY", "octo", 148, 214, "screen confirm")]
 BTN_R = 17
@@ -579,7 +585,7 @@ SET_BTNS = [  # (label, icon, cx, cy, action)
     ("SLIDESHOW", "clock", 160, 86, "screen timing"),
     ("NETWORK", "wifi", 256, 86, "screen network"),
     ("NIGHT", "moon", 112, 168, "nightmode"),             # cycles auto -> on -> off (state nightmode)
-    ("APPS", "qr", 208, 168, "screen configure"),          # QR code for the web page (qrscreen.py)
+    ("WEB PAGE", "qr", 208, 168, "screen configure"),      # QR code for the web page (qrscreen.py)
     # no STAY here: on the stock Chumby it lives on Home's slideshow controls only
 ]
 DONE_BOX = (248, 206, 308, 230)
@@ -620,7 +626,7 @@ def done_pill(d, label="DONE"):
 def settings(out, rgb565, info, night=False):
     """Settings and its sub-screens (timing, network, about), as screens settings, timing,
     network, about (+ _night). info: dict of strings the renderer gathered from the Chumby.
-    APPS opens screen "configure" (the QR code), which the renderer adds from qrscreen.py."""
+    WEB PAGE opens screen "configure" (the QR code), which the renderer adds from qrscreen.py."""
     global T
     T = NIGHT if night else LIGHT
     sfx = "_night" if night else ""

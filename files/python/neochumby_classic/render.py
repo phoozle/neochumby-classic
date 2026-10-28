@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import assets, config, limits, output, qrscreen, screens, widget
+from . import appsscreen, assets, config, limits, output, qrscreen, screens, widget
 
 W, H = widget.W, widget.H
 FILE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,%d}" % (limits.FILE_NAME - 1))
@@ -428,7 +428,10 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
     man += screens.home(out, write, app_titles, app_thumbs, night=True)    # dark theme, shown in night mode
     man += screens.settings(out, write, info)
     man += screens.settings(out, write, info, night=True)
-    url = g["config_url"]                                  # Settings -> APPS: the QR code for the web page
+    apps = appsscreen.full_apps()                          # Home -> APPS: the neochumby apps in the tree
+    man += appsscreen.render(out, write, apps)
+    man += appsscreen.render(out, write, apps, night=True)
+    url = g["config_url"]                                  # Settings -> WEB PAGE: the QR code for the web page
     man += qrscreen.configure(out, write, url)
     man += qrscreen.configure(out, write, url, night=True)
     screens.T = screens.LIGHT

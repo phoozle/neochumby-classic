@@ -2,7 +2,7 @@
 """web: the Chumby's "my channels" page, a local, cut-down copy of chumby.com's.
 
 Runs once per server, beside neochumbyd (neochumby-classic-web). Phones reach it from the
-QR code in Settings -> APPS on the Chumby. It edits the config file the renderer reads at
+QR code in Settings -> WEB PAGE on the Chumby. It edits the config file the renderer reads at
 the start of every render (see config.py):
   - the channel's line-up of apps, in play order (drag and drop, or the arrows)
   - "customize": each app's sub-slides (on/off, order), seconds per slide and its own

@@ -101,7 +101,7 @@ as neochumbyd's user.
 | `NEOCHUMBY_CLASSIC_STATE` | `/var/lib/neochumby-classic` | config.json, photos, caches, `refresh/`, `info/` |
 | `NEOCHUMBY_CLASSIC_OUT` | `$STATE/out` | the renders, one directory per Chumby |
 | `NEOCHUMBY_CLASSIC_ADMIN` | `/var/lib/neochumbyd/admin.sock` | neochumbyd's admin socket |
-| `NEOCHUMBY_CLASSIC_TREE` | `/var/lib/neochumbyd/tree` | neochumbyd's app tree (for the start-app list) |
+| `NEOCHUMBY_CLASSIC_TREE` | `/var/lib/neochumbyd/tree` | neochumbyd's app tree (the start-app list, and Home's APPS); `NEOCHUMBY_TREE` wins if set |
 | `NEOCHUMBY_CLASSIC_WEB` | `0.0.0.0:8080` | where the web page listens |
 | `NEOCHUMBY_CLASSIC_EVERY` | `600` | seconds between renders (at least 60) |
 | `NEOCHUMBY_CLASSIC_CHUMBYS` | (ask neochumbyd) | the Chumbys to render, if not the paired ones |

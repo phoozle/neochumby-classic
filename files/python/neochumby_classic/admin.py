@@ -26,8 +26,8 @@ Start apps are the apps in neochumbyd's tree whose manifest says start=true (pro
 Environment:
   NEOCHUMBY_CLASSIC_ADMIN   the socket (default /var/lib/neochumbyd/admin.sock; NEOCHUMBY_ADMIN,
                             as neochumbyd names it for its own daemons, is used if set)
-  NEOCHUMBY_CLASSIC_TREE    neochumbyd's app tree (default /var/lib/neochumbyd/tree;
-                            NEOCHUMBY_TREE is used if set)
+  NEOCHUMBY_TREE            neochumbyd's app tree, as neochumbyd gives it to its daemons
+  NEOCHUMBY_CLASSIC_TREE    else this (default /var/lib/neochumbyd/tree)
 
 As a command, for install.sh and for checking a setup by hand:
   neochumby-classic-admin paired      the paired Chumbys, one per line
@@ -70,7 +70,8 @@ def socket_path():
 
 
 def tree_dir():
-    return os.environ.get("NEOCHUMBY_CLASSIC_TREE") or os.environ.get("NEOCHUMBY_TREE") or DEFAULT_TREE
+    """neochumbyd's app tree: the start apps (the web page) and Home -> APPS (appsscreen.py)."""
+    return os.environ.get("NEOCHUMBY_TREE") or os.environ.get("NEOCHUMBY_CLASSIC_TREE") or DEFAULT_TREE
 
 
 # ---------------------------------------------------------------- start apps, from the tree
