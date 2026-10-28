@@ -75,8 +75,8 @@ longitude (for night mode); under the Weather app's **customize**, your place.
 Re-run `install.sh` to upgrade (after `git pull`) or to change an option (`--help` lists
 them); it keeps the settings it was given before. `sudo ./install.sh --token` stores a new
 owner token after `neochumbyd token new`. `sudo ./install.sh --uninstall` removes the
-services and the venv but keeps your config, photos and renders; add `--purge` to remove
-those and the user too. It never installs or changes neochumbyd.
+services, the venv and the settings but keeps your config, photos, renders and assets;
+add `--purge` to remove those and the user too. It never installs or changes neochumbyd.
 
 **The admin socket and the dedicated user.** neochumbyd's admin socket (neochumby PR #9)
 answers only neochumbyd's own user and root. Until it also lets its group in, the
@@ -104,13 +104,33 @@ as neochumbyd's user.
 | `NEOCHUMBY_CLASSIC_ASSETS` | `/etc/neochumby-classic/assets` | your own pictures (below) |
 | `NEOCHUMBY_CLASSIC_CONFIG` | `$STATE/config.json` | the channel settings the web page writes |
 
-## Your own logo and footage
+## The original logo and footage
 
-Nothing that belongs to someone else is in this repository: no Chumby logo or octopus, no
-broadcaster's or company's logos, no video. Each widget draws a placeholder instead. To
-use pictures you have the right to use, on your own server only, put them in
-`/etc/neochumby-classic/assets/` (readable by the service user) and they replace the
-placeholders at the next render:
+This repository's code contains none of the original artwork: no Chumby logo or octopus,
+no broadcaster's or company's logos, no video. Each widget draws a placeholder instead.
+
+The originals are available separately, from
+[phoozle/neochumby-classic-assets](https://github.com/phoozle/neochumby-classic-assets).
+**They are not covered by this repository's MIT licence.** Each file belongs to its owner,
+as that repository's README says, so check it before you use them. To use them on your
+server:
+
+```sh
+sudo ./install.sh --assets          # clones it into /etc/neochumby-classic/assets, or pulls it
+```
+
+or by hand:
+
+```sh
+sudo git clone https://github.com/phoozle/neochumby-classic-assets /etc/neochumby-classic/assets
+```
+
+install.sh remembers `--assets` and pulls again whenever it is re-run. `--assets URL` takes
+another repository (your own copies, say), and `--uninstall --purge` removes the directory.
+They replace the placeholders at the next render.
+
+You can also use pictures of your own: put them in `/etc/neochumby-classic/assets/`
+(`NEOCHUMBY_CLASSIC_ASSETS`), readable by the service user, under these names:
 
 | File | Used for | Without it |
 | --- | --- | --- |
@@ -124,7 +144,7 @@ placeholders at the next render:
   (needs ffmpeg and numpy).
 - The news header's two files can be cut from a banner with
   `python -m neochumby_classic.widgets.news assets BANNER.png DIR`.
-- These files stay on your server: keep them out of any fork you publish
+- Keep pictures like these out of any fork of this repository you publish
   (`private-assets/` is in `.gitignore` for that).
 
 ## Data sources: terms to check

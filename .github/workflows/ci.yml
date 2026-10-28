@@ -56,9 +56,25 @@ jobs:
           sudo ./install.sh --no-start < /dev/null
           grep -q '^NEOCHUMBY_CLASSIC_WEB=0.0.0.0:8080$' /etc/neochumby-classic/env
           systemctl is-active neochumby-classic-renderer neochumby-classic-web
+      - name: Assets from a git repository (a stand-in with no artwork in it)
+        run: |
+          G="sudo git -C /tmp/fake-assets -c user.name=ci -c user.email=ci@example.invalid"
+          sudo git init -q -b main /tmp/fake-assets
+          echo "no artwork here" | sudo tee /tmp/fake-assets/one.txt >/dev/null
+          $G add -A && $G commit -qm one
+          sudo ./install.sh --no-start --assets file:///tmp/fake-assets < /dev/null
+          sudo -u neochumby-classic cat /etc/neochumby-classic/assets/one.txt
+          grep -qx 'CLASSIC_ASSETS_URL=file:///tmp/fake-assets' /etc/neochumby-classic/env
+          echo "still none" | sudo tee /tmp/fake-assets/two.txt >/dev/null
+          $G add -A && $G commit -qm two
+          sudo ./install.sh --no-start < /dev/null
+          sudo -u neochumby-classic cat /etc/neochumby-classic/assets/two.txt
       - name: Uninstall
         run: |
+          sudo ./install.sh --uninstall
+          test -e /etc/neochumby-classic/assets/one.txt
           sudo ./install.sh --uninstall --purge
+          test ! -e /etc/neochumby-classic
           if systemctl cat neochumby-classic-web.service >/dev/null 2>&1; then exit 1; fi
           if id neochumby-classic >/dev/null 2>&1; then exit 1; fi
           test ! -e /opt/neochumby-classic

@@ -22,10 +22,15 @@
 #   --token              ask for the owner token again (after `neochumbyd token new`)
 #   --widget SPEC        also install a widget: git+https://HOST/PATH@<40-hex commit>;
 #                        may be given more than once; remembered in widgets.txt
+#   --assets [URL]       clone the original artwork (not MIT: see its README) into
+#                        NEOCHUMBY_CLASSIC_ASSETS [/etc/neochumby-classic/assets], or pull it
+#                        if it's there; URL [https://github.com/phoozle/neochumby-classic-assets];
+#                        remembered, so later runs pull it again
 #   --no-start           install, but don't start or restart the services
-#   --uninstall          stop and remove the services, the venv and /etc/neochumby-classic
-#                        (keeps STATE: your config, photos and renders)
-#   --purge              with --uninstall: also remove STATE and the user
+#   --uninstall          stop and remove the services, the venv and the settings in
+#                        /etc/neochumby-classic (keeps STATE, your config, photos and
+#                        renders, and the assets directory)
+#   --purge              with --uninstall: also remove STATE, the assets directory and the user
 set -eu
 
 die() { echo "install.sh: $*" >&2; exit 1; }
@@ -36,6 +41,7 @@ ETC=/etc/neochumby-classic
 ENVFILE=$ETC/env
 UNITDIR=/etc/systemd/system
 UNITS="neochumby-classic-renderer.service neochumby-classic-web.service"
+ASSETS_REPO=https://github.com/phoozle/neochumby-classic-assets
 
 [ "$(id -u)" = 0 ] || die "run it as root (sudo ./install.sh)"
 
@@ -53,6 +59,8 @@ SOCKET=${NEOCHUMBY_CLASSIC_ADMIN:-/var/lib/neochumbyd/admin.sock}
 TREE=${NEOCHUMBY_CLASSIC_TREE:-/var/lib/neochumbyd/tree}
 LISTEN=${NEOCHUMBY_CLASSIC_WEB:-0.0.0.0:8080}
 HEIF=${CLASSIC_HEIF:-0}
+ASSETS_DIR=${NEOCHUMBY_CLASSIC_ASSETS:-$ETC/assets}
+ASSETS_URL=${CLASSIC_ASSETS_URL:-}
 ASK_TOKEN=0
 START=1
 UNINSTALL=0
@@ -73,10 +81,16 @@ while [ $# -gt 0 ]; do
 	--heif) HEIF=1 ;;
 	--token) ASK_TOKEN=1 ;;
 	--widget) need "$@"; WIDGETS="$WIDGETS $2"; shift ;;
+	--assets)
+		case ${2:-} in
+		"" | -*) ASSETS_URL=$ASSETS_REPO ;;
+		*) ASSETS_URL=$2; shift ;;
+		esac
+		;;
 	--no-start) START=0 ;;
 	--uninstall) UNINSTALL=1 ;;
 	--purge) PURGE=1 ;;
-	-h | --help) sed -n '2,32p' "$0"; exit 0 ;;
+	-h | --help) sed -n '2,33p' "$0"; exit 0 ;;
 	*) die "unknown option $1 (see --help)" ;;
 	esac
 	shift
@@ -86,7 +100,7 @@ OUT=${OUT:-$STATE/out}
 for v in "$USER_NAME" "$GROUP_NAME"; do
 	echo "$v" | grep -Eq '^[a-z_][a-z0-9_-]{0,31}$' || die "not a user or group name: $v"
 done
-for v in "$PREFIX" "$STATE" "$OUT" "$SOCKET" "$TREE"; do
+for v in "$PREFIX" "$STATE" "$OUT" "$SOCKET" "$TREE" "$ASSETS_DIR"; do
 	case $v in
 	/*) ;;
 	*) die "paths must be absolute: $v" ;;
@@ -94,6 +108,10 @@ for v in "$PREFIX" "$STATE" "$OUT" "$SOCKET" "$TREE"; do
 	echo "$v" | grep -q '[[:space:]]' && die "paths can't contain spaces: $v"
 done
 echo "$LISTEN" | grep -Eq '^[][0-9A-Za-z.:-]+:[0-9]{1,5}$' || die "--listen is ADDRESS:PORT"
+if [ -n "$ASSETS_URL" ]; then
+	echo "$ASSETS_URL" | grep -Eq '^(https://[A-Za-z0-9.-]+|file://)/[A-Za-z0-9._/-]+$' ||
+		die "--assets takes an https:// (or file://) URL of a git repository: $ASSETS_URL"
+fi
 
 have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
 
@@ -106,8 +124,16 @@ if [ "$UNINSTALL" = 1 ]; then
 		done
 		systemctl daemon-reload
 	fi
-	rm -rf "$PREFIX" "$ETC"
-	say "removed the services, $PREFIX and $ETC"
+	rm -rf "$PREFIX"
+	rm -f "$ENVFILE" "$ETC/owner-token" "$ETC/widgets.txt"
+	say "removed the services, $PREFIX and the settings in $ETC"
+	if [ "$PURGE" = 1 ]; then
+		rm -rf "$ASSETS_DIR"
+		say "removed $ASSETS_DIR"
+	else
+		say "kept $ASSETS_DIR; --uninstall --purge removes it"
+	fi
+	rmdir "$ETC" 2>/dev/null || true
 	if [ "$PURGE" = 1 ]; then
 		rm -rf "$STATE"
 		[ "$OUT" = "${OUT#"$STATE"/}" ] && rm -rf "$OUT"
@@ -146,7 +172,25 @@ fi
 # group (setgid, so new files and directories keep the group). docs/interface.md.
 install -d -o "$USER_NAME" -g "$GROUP_NAME" -m 2750 "$STATE" "$OUT"
 install -d -o "$USER_NAME" -g "$GROUP_NAME" -m 2770 "$STATE/refresh" "$STATE/info"
-install -d -o root -g root -m 0755 "$ETC" "$ETC/assets"
+install -d -o root -g root -m 0755 "$ETC" "$ASSETS_DIR"
+
+# ---------------------------------------------------------------- the original artwork
+# A separate repository, not covered by this one's licence (its README says whose each file
+# is). Cloned as root and world-readable, so the services can read it but not change it.
+if [ -n "$ASSETS_URL" ]; then
+	command -v git >/dev/null 2>&1 || die "--assets needs git (Debian: apt install git)"
+	if [ -d "$ASSETS_DIR/.git" ]; then
+		say "updating $ASSETS_DIR from $ASSETS_URL"
+		git -C "$ASSETS_DIR" remote set-url origin "$ASSETS_URL"
+		git -C "$ASSETS_DIR" pull --quiet --ff-only
+	elif [ -z "$(ls -A "$ASSETS_DIR")" ]; then
+		say "cloning $ASSETS_URL into $ASSETS_DIR"
+		(umask 022 && git clone --quiet "$ASSETS_URL" "$ASSETS_DIR")
+	else
+		die "$ASSETS_DIR already holds files that aren't a clone; move them, then re-run with --assets"
+	fi
+	chmod -R a+rX "$ASSETS_DIR"
+fi
 
 # ---------------------------------------------------------------- the venv
 say "installing into $PREFIX/venv"
@@ -177,7 +221,8 @@ NEOCHUMBY_CLASSIC_OUT=$OUT
 NEOCHUMBY_CLASSIC_ADMIN=$SOCKET
 NEOCHUMBY_CLASSIC_TREE=$TREE
 NEOCHUMBY_CLASSIC_WEB=$LISTEN
-NEOCHUMBY_CLASSIC_ASSETS=$ETC/assets
+NEOCHUMBY_CLASSIC_ASSETS=$ASSETS_DIR
+CLASSIC_ASSETS_URL=$ASSETS_URL
 EOF
 # kept from an earlier file if you added them by hand
 [ -z "${NEOCHUMBY_CLASSIC_CHUMBYS:-}" ] || echo "NEOCHUMBY_CLASSIC_CHUMBYS=\"$NEOCHUMBY_CLASSIC_CHUMBYS\"" >>"$ENVFILE"
