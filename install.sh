@@ -93,7 +93,7 @@ for v in "$PREFIX" "$STATE" "$OUT" "$SOCKET" "$TREE"; do
 	esac
 	echo "$v" | grep -q '[[:space:]]' && die "paths can't contain spaces: $v"
 done
-echo "$LISTEN" | grep -Eq '^[0-9A-Za-z.:[\]-]+:[0-9]{1,5}$' || die "--listen is ADDRESS:PORT"
+echo "$LISTEN" | grep -Eq '^[][0-9A-Za-z.:-]+:[0-9]{1,5}$' || die "--listen is ADDRESS:PORT"
 
 have_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
 
