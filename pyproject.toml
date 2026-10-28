@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neochumby-classic"
+version = "0.1.0"
+description = "The classic Chumby experience for neochumby: a renderer for weather, news, stocks, photos and an aurora, and a \"my channels\" web page."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Matthew Croall" }]
+requires-python = ">=3.11"
+dependencies = [
+    "Pillow>=10.0",
+    "segno>=1.5",       # the QR code in Settings -> APPS
+]
+
+[project.optional-dependencies]
+heif = ["pillow-heif>=0.16"]   # iPhone HEIC photo uploads
+dev = ["ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/phoozle/neochumby-classic"
+
+[project.scripts]
+neochumby-classic-renderer = "neochumby_classic.service:main"
+neochumby-classic-web = "neochumby_classic.web:main"
+neochumby-classic-render = "neochumby_classic.render:main"
+neochumby-classic-admin = "neochumby_classic.admin:main"
+
+# The built-in widgets are found the same way as any other (docs/widgets.md).
+# Keep widget.BUILTIN in step with this table.
+[project.entry-points."neochumby_classic.widgets"]
+aurora = "neochumby_classic.widgets.aurora"
+news = "neochumby_classic.widgets.news"
+photos = "neochumby_classic.widgets.photos"
+stocks = "neochumby_classic.widgets.stocks"
+weather = "neochumby_classic.widgets.weather"
+
+[tool.setuptools.packages.find]
+where = ["files/python"]
+
+[tool.setuptools.package-data]
+neochumby_classic = ["data/fonts/*", "data/fonts/licenses/*", "widgets/icons/*.png"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 130
+
+[tool.ruff.lint]
+# pyflakes (undefined and unused names, imports) and syntax errors. The style is the
+# code's own: long, aligned lines.
+select = ["F", "E9"]

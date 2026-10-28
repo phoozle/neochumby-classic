@@ -1,0 +1,10 @@
+__pycache__/
+*.py[co]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.ruff_cache/
+# Owners' own pictures never belong in this repository (README: "Your own logo and footage")
+private-assets/
