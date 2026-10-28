@@ -87,7 +87,7 @@ missing ones get their defaults).
 The renderer plans the slideshow before anything is drawn: apps in channel order, each
 app's enabled sub-slides in order, each sub-slide `page_count(subslide_id, options)`
 pages (`subslide_id` is `None` for a widget without sub-slides). Whatever doesn't fit in
-the engine's 48 pages is cut, and the web page shows what was cut. `render()` is then
+the engine's 128 pages (limits.py) is cut, and the web page shows what was cut. `render()` is then
 told exactly how many pages to draw for each sub-slide.
 
 ### `render(ctx)`
@@ -156,7 +156,7 @@ manifest by their file name only.
 | Directive | Meaning |
 | --- | --- |
 | `screen NAME FILE` | a 320×240 screen; `NAME_night`, if there is one, is shown instead in night mode |
-| `pane SCREEN FILE W H X Y VAR FRAMES` | a picture on the screen showing the frame for state variable `VAR` |
+| `pane SCREEN FILE W H X Y VAR FRAMES` | a picture on the screen showing the frame for state variable `VAR` (FILE: the frames stacked, `W*H*FRAMES*2` bytes). `SCREEN` may also be `page:N` or `pagenight:N`, one of the widget's own pages |
 | `hot SCREEN X Y W H ACTION [ARG]` | a hot zone: a tap there does `ACTION` |
 | `slider SCREEN EMPTY FULL KNOB W H X Y T0 T1 KW KH` | the volume slider |
 
@@ -164,7 +164,39 @@ Actions: `slideshow` (back to the slideshow, to the page a `pagetap` came from),
 `screen NAME`, `chumby` (leave for the stock Chumby software), `music_toggle`,
 `station N`, `next_station`, `night`, `nightmode`, `pin`, `next_app`, `prev_app`,
 `secs_up`, `secs_down`. State variables for panes: `music`, `station`, `night`,
-`nightmode`, `pin`, `secs`, `app`.
+`nightmode`, `pin`, `secs`, `app`, and the live values `wifi` (0-4 bars) and `wifi_pct`.
+
+### Live values
+
+A few things the engine reads on the Chumby itself and draws without waiting for a render
+(neochumby's live-values spec, v1). A widget never draws these into its pictures: they
+would be stale, and a change would make the picture new.
+
+| Key | What | Text |
+| --- | --- | --- |
+| `wifi` | WiFi link quality as bars | `0`-`4`; as a pane variable, the frame |
+| `wifi_pct` | the same, in per cent | `54%`; as a pane variable, 0-100 |
+| `ip` | the Chumby's IPv4 address | `192.0.2.7` |
+| `ssid` | the WiFi network's name | as is |
+| `uptime` | time since boot | `42m`, `5h 7m`, `3d 4h` |
+| `mem_free` | free memory | `33.1 MB` |
+| `stick_free` | free space on the USB stick | `1.4 GB`, `830 MB` |
+| `firmware` | the Chumby's firmware version | as is |
+| `name` | the Chumby's name | as is |
+
+A value the engine can't read is drawn as `?` (a pane shows frame 0). Text is cut to 32
+characters.
+
+| Directive | Meaning |
+| --- | --- |
+| `livefont NAME FILE CELLW CELLH [W0 .. W78]` | a font for live text: the 79 glyphs of `widget.LIVE_CHARSET` in order, each in a `CELLW`×`CELLH` cell (1-64), stacked vertically, `0xF81F` transparent; FILE is `CELLW*CELLH*79*2` bytes. The widths are the glyphs' advances, all 79 or none (monospace). It comes before the `live` lines that use it |
+| `live TARGET KEY FONT X Y W H ALIGN BG` | a box where the engine draws value `KEY` in `FONT`: `TARGET` is a screen declared before, or `page:N` / `pagenight:N`; the box lies inside the screen; `ALIGN` is `left`, `right` or `center`; `BG` is `bg` (the target's own picture under the box) or `#RRGGBB` |
+
+Draw the glyphs anti-aliased against the colour they will sit on, as Settings does
+(`screens.livefont`). `python -m neochumby_classic.preview` fills the boxes with values you
+give it (`ip=192.0.2.7`). Settings → Network and Chumby Info, and Home's signal bars, are
+the examples. While a page shows its `pagenight` picture, its `pagenight:N` panes and boxes
+are drawn if it has any, else its `page:N` ones.
 
 **Shared by the whole slideshow** (one widget only: the first in play order that writes
 one wins, and later ones are dropped): `clock FILE CELLW CELLH RIGHT Y W0..W14`,
@@ -193,10 +225,9 @@ memory. So:
 - **Stable names.** The same picture gets the same name every render: name by slot
   (`stocks_d2.raw`, `news_nat_s1_p0.raw`), never by content, time or a counter. Start
   every name with the widget's id (`clock_time.raw`, screen `clock_settings`), or a
-  short form of it when the id is long (Whyalla News uses `wn_`).
-- **Short screen names.** A screen name is 1-23 letters, digits and `_`, its `_night`
-  copy's included (the engine keeps 24 bytes for it), so keep the day name to 17. File
-  names may be up to 63 characters. The renderer refuses a longer screen name.
+  short form of it (Whyalla News uses `wn_`, from when the engine allowed 23 bytes).
+- **Screen names** are letters, digits and `_`, at most 48 bytes with `_night` (the
+  limits below).
 - **Write if changed.** Write through `ctx.write565` / `ctx.write`. They leave an
   identical file alone and replace a changed one atomically (interface.md).
 - **No per-run times in big files.** A clock reading "rendered 7:42" or an age like "3 min
@@ -214,21 +245,32 @@ memory. So:
   [`limits.py`](../files/python/neochumby_classic/limits.py), which the smoke test checks
   against this table:
 
-  | Directive | In the engine | Limit |
+  | Directive | What | Limit |
   | --- | --- | --- |
-  | `page` | `MAXP`: slideshow pages | 48 |
-  | `screen` | `MAXSCR`: screens (each `_night` copy counts) | 160 |
-  | `pane` | `MAXPANE` | 128 |
-  | `hot` | `MAXHOT`: hot zones | 768 |
-  | `sprite` | `MAXS` | 64 |
-  | `actor` | `MAXA` | 64 |
-  | `glow` | `MAXGLOW`: light layers | 16 |
-  | `glowseq` | `MAXGSQ`: light clips (`MAXGSQ_FRAMES`: 1000 frames each) | 4 |
-  | `station` | `MAXST`: music stations | 16 |
-  | `sun` | `MAXSUN`: sunrise/sunset days | 16 |
-  | (files) | `MAXASSET`: different files the manifest names | 640 |
+  | `page` | slideshow pages | 128 |
+  | `screen` | screens (each `_night` copy counts) | 512 |
+  | `slider` | volume sliders | 512 |
+  | `pane` | panes, on screens and pages together | 512 |
+  | `hot` | tap zones | 2048 |
+  | `sprite` | sprites, all pages | 256 |
+  | `actor` | actors | 128 |
+  | `glow` | light layers | 32 |
+  | `glowseq` | light clips (1000 frames each) | 8 |
+  | `station` | music stations | 64 |
+  | `sun` | sunrise/sunset days | 32 |
+  | `secsopts` | slideshow timings | 12 |
+  | `livefont` | live-text fonts | 32 |
+  | `live` | live-text boxes | 512 |
+  | (files) | different files the manifest names (glowseq frames and fonts included) | 4096 |
 
-  With every built-in widget on, a channel uses 16 pages, 107 screens, 19 panes and 481 hot zones.
+  And lengths: a screen name (its `_night` copy's included, so keep a base name to 42), a
+  `pagetap` or `hot` argument, a pane or live target and a font name are at most 48 bytes;
+  a file name 96; a glowseq prefix 88; a `hot` action 15; a pane variable 11. Positions and
+  sizes are within -32768..32767, and `manifest.txt` and `hashes.txt` at most 2 MB each.
+  The engine skips a line past any of these; the renderer refuses the render instead.
+
+  With every built-in widget on, a channel uses 16 pages, 107 screens, 23 panes, 481 hot zones,
+  2 live fonts and 16 live boxes.
 - **Untrusted content stays pixels.** Text and pictures from the internet are only ever
   drawn. Names, directives and paths never come from fetched content.
 - **Fetch politely.** Send `ctx.user_agent`, use timeouts, cache in `ctx.state_dir`, and

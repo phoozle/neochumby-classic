@@ -202,7 +202,7 @@ def renders(work, out, shots):
                           ("stocks", preview.page(out, pages["stocks_summary"])),
                           ("photos", preview.page(out, pages["photos_0"])),
                           ("aurora", preview.page(out, pages["aurora_bg"])),
-                          ("home", preview.screen(out, "home")),
+                          ("home", preview.screen(out, "home", values=preview.EXAMPLE)),
                           ("settings", preview.screen(out, "settings"))):
             img.resize((640, 480), resample=0).save(os.path.join(shots, f"{name}.png"), optimize=True)
         print(f"      screenshots in {shots}")
@@ -328,23 +328,65 @@ def weather_places(work):
 
 
 # ---------------------------------------------------------------- Settings -> Network and Chumby Info
-def chumby_info(work):
-    from neochumby_classic import render, screens
+def chumby_info(work, out):
+    from neochumby_classic import config, preview, render, screens
     rows = screens.network_rows(render.chumby_info(None, {})) + screens.about_rows(render.chumby_info(None, {}))
-    check(all(v == "?" for _, v in rows), "info: without the file, every row shows '?'")
+    check(all(v == "?" or (v in (None, "") and k) for _, v, k in rows), "info: without the file, every row is live or '?'")
     path = os.path.join(work, "info-kitchen")
     with open(path, "w") as fh:
-        fh.write("ssid=Home WiFi\nquality=lots\nsignal=-61\nmemfree=12\nfeed=spoofed\nbogus=1\nengine=\nasof=19:30\n")
+        fh.write("ssid=Home WiFi\nquality=60\nip=192.0.2.9\nuptime_s=99\nmemfree=1 2\nfirmware=1.0\nhostname=x\nusb=1 2\n"
+                 "feed=spoofed\nbogus=1\nengine=\n")
+    before = snapshot(out)
+    time.sleep(0.05)
+    changed = render.render(out, config.load(), "kitchen", info_path=path, now=NOW)
+    diff = sorted(f for f, v in snapshot(out).items() if before.get(f) != v)
+    check(not changed and not diff, f"info: what the Chumby reads itself is never drawn in: those keys change nothing {diff[:5]}")
+    with open(path, "w") as fh:
+        fh.write("signal=-61\nkernel=2.6.28-chumby\ngateway=192.0.2.1\nengine=neochumby 0.4\nmac=?x\nasof=19:30\n")
     info = render.chumby_info(path, {"feed": "weather of 28 Oct"})
-    net, about = dict(screens.network_rows(info)), dict(screens.about_rows(info))
-    check(net["Network"] == "Home WiFi" and net["Signal"] == "-61 dBm" and net["IP address"] == "?",
-          f"info: reported keys show, missing ones '?' {net}")
-    check(about["Memory"] == "?" and about["Engine"] == "?" and about["Feed"] == "weather of 28 Oct" and "bogus" not in info,
-          f"info: malformed, empty and unknown keys are ignored {about}")
-    check(screens.signal_level(info) == 4 and screens.signal_level({"quality": "40"}) == 2,
-          "info: Home's bars follow the link quality, all four when it's unknown")
+    net = {label: v for label, v, _ in screens.network_rows(info)}
+    about = {label: v for label, v, _ in screens.about_rows(info)}
+    check(net["Signal"] == "-61 dBm" and net["Gateway"] == "192.0.2.1" and net["DNS"] == "?" and net["IP address"] is None,
+          f"info: the keys the Chumby can't read show, missing ones '?' {net}")
+    check(about["Kernel"] == "Linux 2.6.28-chumby" and about["Feed"] == "weather of 28 Oct" and "bogus" not in info,
+          f"info: unknown keys are ignored {about}")
+    render.render(out, config.load(), "kitchen", info_path=path, now=NOW)
+    after = snapshot(out)
+    diff = sorted(f for f, v in after.items() if before.get(f) != v and f.endswith(".raw"))
+    check(diff and all(f.startswith(("network", "about")) for f in diff), f"info: those change only Network and Chumby Info {diff}")
     keys = re.findall(r"`([a-z_]+)`", open(os.path.join(ROOT, "docs", "interface.md")).read().split("## Facts from the Chumby")[1])
     check(set(render.INFO_KEYS) <= set(keys), f"info: docs/interface.md documents every key {sorted(set(render.INFO_KEYS) - set(keys))}")
+
+    # live values (the engine's spec v1): the directives, and that they're valid
+    lines = manifest(out)
+    joined = [" ".join(t) for t in lines]
+    check(render.problems(joined, out) == [], f"live: every line is one the engine takes {render.problems(joined, out)[:3]}")
+    fonts = {t[1]: t for t in lines if t[0] == "livefont"}
+    check(set(fonts) >= {"info", "info_night"} and all(len(t) == 5 + 79 for t in fonts.values()),
+          "live: a glyph strip per theme, with 79 widths")
+    live = {(t[1], t[2]) for t in lines if t[0] == "live"}
+    for sfx in ("", "_night"):
+        want = {("network" + sfx, k) for k in ("ssid", "wifi_pct", "ip")} | \
+               {("about" + sfx, k) for k in ("name", "firmware", "uptime", "mem_free", "stick_free")}
+        check(want <= live, f"live: Network{sfx} and Chumby Info{sfx} show the Chumby's own values {sorted(want - live)}")
+        for scr in ("home", "network"):
+            p = [t for t in lines if t[0] == "pane" and t[1] == scr + sfx and t[7] == "wifi"]
+            check(len(p) == 1 and p[0][8] == "5", f"live: {scr}{sfx}'s signal bars are a 5-frame wifi pane")
+    order = {}
+    for k, t in enumerate(lines):
+        order.setdefault((t[0], t[1]), k)
+    check(all(order[("livefont", t[3])] < k and order[("screen", t[1])] < k for k, t in enumerate(lines) if t[0] == "live"),
+          "live: each box comes after its font and its screen")
+    bad = render.problems(["screen s s.raw", "livefont f s.raw 7 12 1 2", "live s nope f 0 0 10 10 left bg",
+                           "live s ip g 0 0 10 10 left bg", "live s ip f 300 0 30 10 left bg", "live page:3 ip f 0 0 9 9 left bg",
+                           "pane t x.raw 1 1 0 0 wifi 5", "live s ip f 0 0 10 10 middle #12345"])
+    check(len(bad) == 7, f"live: lines the engine would skip are caught ({len(bad)} of 7)")
+    plain = preview.screen(out, "network")
+    shown = preview.screen(out, "network", values=preview.EXAMPLE)
+    box = next(t for t in lines if t[:3] == ["live", "network", "ip"])
+    x, y, w, h = map(int, box[4:8])
+    check(plain.crop((x, y, x + w, y + h)).tobytes() != shown.crop((x, y, x + w, y + h)).tobytes(),
+          "live: the preview draws the values in their boxes")
 
 
 # ---------------------------------------------------------------- the renderer service
@@ -551,7 +593,7 @@ def main():
     renders(work, out, a.screenshots)
     whyalla(work, out)
     weather_places(work)
-    chumby_info(work)
+    chumby_info(work, out)
     service(work)
     web(work, out)
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")

@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from . import config
 from . import assets
+from .widget import LIVE_CHARSET
 
 W, H = 320, 240
 SS = 3                                           # supersampling for smooth 2008 gloss
@@ -24,6 +25,7 @@ FD = assets.FONTS       # bundled open fonts, see assets/fonts/README.md
 ROUND = FD + "SNPro-Bold.otf"                            # stands in for Arial Rounded Bold
 VERD, VERDB = FD + "DejaVuSans.ttf", FD + "DejaVuSans-Bold.ttf"   # stand in for Verdana
 NAVY = (40, 70, 150)
+KEY = (255, 0, 255)                              # 0xF81F: transparent in glyph strips
 INK = (35, 60, 130)
 UA = config.USER_AGENT
 
@@ -279,7 +281,7 @@ BTN_R = 17
 TOGGLES = {"night": "night", "pin": "pin"}   # action -> state variable; greyed when off, normal when on
 
 
-def home_background(level=4):
+def home_background():
     img = Image.new("RGB", (W * SS, H * SS))
     d = ImageDraw.Draw(img)
     grad(d, (0, 0, W * SS, H * SS), T["bg_top"], T["bg_bot"])
@@ -290,9 +292,7 @@ def home_background(level=4):
     d.line([(196 * SS, 0), (196 * SS, H * SS)], fill=T["sep"], width=SS)
     d.text((24 * SS, 4 * SS), "Slideshow", font=f(VERDB, 10), fill=T["text"])
     paste_logo(img, 12 * SS, 10 * SS, 14 * SS)
-    for i in range(4):                                             # signal bars, as on the real panel
-        x = (296 + i * 4) * SS                                     # (the same level as Settings > Network)
-        d.rectangle([x, (14 - i * 2) * SS, x + 2 * SS, 15 * SS], fill=(60, 160, 70) if i < level else T["frame2"])
+    # the signal bars, top right, are a pane the engine drives from the WiFi (HOME_BARS)
     # left card frame (dashed, rounded) where the app thumbnail sits
     x0, y0, x1, y1 = 22 * SS, 52 * SS, 176 * SS, 168 * SS
     d.rounded_rectangle([x0, y0, x1, y1], radius=14 * SS, outline=T["frame1"], width=SS)
@@ -315,7 +315,24 @@ def home_background(level=4):
     return small(big_out.convert("RGB"))
 
 
-def home(out, rgb565, page_titles, page_thumbs, night=False, signal=4):
+HOME_BARS = (294, 6, 18, 11)                     # x, y, w, h of Home's signal bars pane
+
+
+def bars_pane(out, rgb565, bg, scr, box, foot):
+    """The signal bars as a pane the engine drives from the Chumby's WiFi (live value `wifi`,
+    0-4 bars): five frames drawn over `bg` (the screen as rendered) at box (x, y, w, h). The
+    bars' feet are `foot` px below the box's top, as on the real control panel."""
+    x, y, w, h = box
+    crop = bg.crop((x, y, x + w, y + h))
+    frs = []
+    for level in range(5):
+        im = Image.new("RGBA", (w * SS, h * SS), (0, 0, 0, 0))
+        signal_bars(ImageDraw.Draw(im), 2, foot, level, (60, 160, 70), T["frame2"])
+        frs.append(on_bg(crop, im))
+    return sheet_pane(out, rgb565, frs, f"{scr}_wifi", scr, x, y, "wifi")
+
+
+def home(out, rgb565, page_titles, page_thumbs, night=False):
     """Home screen files + manifest lines. page_titles/page_thumbs: one per app in the channel (its name
     and its first page as a 320x240 PIL image); the card follows the engine's "app" (pageapp lines).
     night=True renders the dark theme as screen "home_night"; the engine shows it while night mode is on."""
@@ -323,9 +340,10 @@ def home(out, rgb565, page_titles, page_thumbs, night=False, signal=4):
     T = NIGHT if night else LIGHT
     sfx = "_night" if night else ""
     scr = "home" + sfx
-    bg = home_background(signal)
+    bg = home_background()
     rgb565(bg, f"{out}/{scr}.raw")
     lines = [f"screen {scr} {scr}.raw"]
+    lines += bars_pane(out, rgb565, bg, scr, HOME_BARS, 9)
     # left card: app title, "n of N", arrows and a thumbnail, one frame per app
     cw, ch = 180, 150
     cx0, cy0 = 8, 22
@@ -666,8 +684,10 @@ def settings(out, rgb565, info, night=False):
     if not night:
         lines.append("secsopts " + " ".join(map(str, SECS_OPTS)))
     lines += timing_screen(out, rgb565, sfx)
-    lines += info_screen(out, rgb565, "network" + sfx, "Network", "wifi", network_rows(info), info)
-    lines += info_screen(out, rgb565, "about" + sfx, "Chumby Info", "octo", about_rows(info), info)
+    font_line, cell_h = livefont(out, rgb565, "info" + sfx, VERDB, 9, T["text"], T["box"])
+    lines.append(font_line)
+    lines += info_screen(out, rgb565, "network" + sfx, "Network", "wifi", network_rows(info), info, "info" + sfx, cell_h)
+    lines += info_screen(out, rgb565, "about" + sfx, "Chumby Info", "octo", about_rows(info), info, "info" + sfx, cell_h)
     return lines
 
 
@@ -718,14 +738,6 @@ def timing_screen(out, rgb565, sfx):
     return lines
 
 
-def signal_level(info):
-    """WiFi link quality (0-100) as 0-4 bars; 4 when unknown. Home and Settings > Network both use it."""
-    try:
-        return min(4, max(0, (int(info["quality"]) + 12) // 25))
-    except (KeyError, TypeError, ValueError):
-        return 4
-
-
 def signal_bars(d, x, y, level, col, off):
     """Four bars, bottom-aligned at y, level 0-4."""
     for i in range(4):
@@ -734,42 +746,82 @@ def signal_bars(d, x, y, level, col, off):
 
 
 def network_rows(info):
-    q = info.get("quality", "")
+    """(label, drawn value or None, live key or None) per row. The engine reads the live
+    ones on the Chumby itself; the rest come from <state>/info/<chumby> (render.chumby_info)."""
     sig = info.get("signal", "")
-    sig_txt = ", ".join(v for v in (f"{sig} dBm" if sig else "", f"{q}%" if q else "") if v) or "?"
-    return [("Network", info.get("ssid", "?")), ("Signal", sig_txt), ("Access point", info.get("ap", "?")),
-            ("IP address", info.get("ip", "?")), ("Gateway", info.get("gateway", "?")),
-            ("DNS", info.get("dns", "?")), ("MAC address", info.get("mac", "?")), ("Link rate", info.get("rate", "?"))]
+    return [("Network", None, "ssid"), ("Signal", f"{sig} dBm" if sig else "", "wifi_pct"),
+            ("Access point", info.get("ap", "?"), None), ("IP address", None, "ip"),
+            ("Gateway", info.get("gateway", "?"), None), ("DNS", info.get("dns", "?"), None),
+            ("MAC address", info.get("mac", "?"), None), ("Link rate", info.get("rate", "?"), None)]
 
 
 def about_rows(info):
-    return [("Name", info.get("hostname", "?")), ("Firmware", info.get("firmware", "?")),
-            ("Kernel", info.get("kernel", "?")), ("Uptime", info.get("uptime", "?")),
-            ("Memory", info.get("memory", "?")), ("USB stick", info.get("usb", "?")),
-            ("Engine", info.get("engine", "?")), ("Feed", info.get("feed", "?"))]
+    return [("Name", None, "name"), ("Firmware", None, "firmware"), ("Kernel", info.get("kernel", "?"), None),
+            ("Uptime", None, "uptime"), ("Memory free", None, "mem_free"), ("USB stick free", None, "stick_free"),
+            ("Engine", info.get("engine", "?"), None), ("Feed", info.get("feed", "?"), None)]
 
 
-def info_screen(out, rgb565, scr, title, kind, rows, info):
-    """A read-only page of label / value rows, rendered on the server (the Chumby can't draw text)."""
+def livefont(out, rgb565, name, path, size, fg, bg):
+    """A `livefont` glyph strip for the engine's live text, in this font at `size` (as f()
+    draws it): the 79 glyphs of LIVE_CHARSET, each left-aligned in a CELLW x CELLH cell,
+    anti-aliased against `bg` (the box it goes in) and 0xF81F where it doesn't touch. Returns
+    (the manifest line, CELLH); the baseline is the font's ascent below the cell's top."""
+    fnt = f(path, size)
+    asc, desc = fnt.getmetrics()
+    ch = math.ceil((asc + desc) / SS)
+    cw = min(64, max(math.ceil(max(fnt.getbbox(c)[2], fnt.getlength(c)) / SS) for c in LIVE_CHARSET) + 1)
+    strip = Image.new("RGB", (cw, ch * len(LIVE_CHARSET)), KEY)
+    ink, paper = Image.new("RGB", (cw, ch), fg), Image.new("RGB", (cw, ch), bg)
+    for i, c in enumerate(LIVE_CHARSET):
+        m = Image.new("L", (cw * SS, ch * SS), 0)
+        ImageDraw.Draw(m).text((0, asc), c, font=fnt, fill=255, anchor="ls")
+        m = m.resize((cw, ch), Image.BOX)
+        cell = Image.composite(ink, paper, m)
+        cell.paste(KEY, (0, 0, cw, ch), m.point(lambda v: 255 if v < 8 else 0))
+        strip.paste(cell, (0, i * ch))
+    rgb565(strip, f"{out}/{name}_font.raw")
+    widths = [min(cw, max(1, round(fnt.getlength(c) / SS))) for c in LIVE_CHARSET]
+    return f"livefont {name} {name}_font.raw {cw} {ch} " + " ".join(map(str, widths)), ch
+
+
+def info_screen(out, rgb565, scr, title, kind, rows, info, font, cell_h):
+    """A read-only page of label / value rows. The values the Chumby knows itself are `live`
+    boxes (in `font`, cell_h tall) and the signal bars a pane, which the engine fills in on
+    the Chumby; the rest are drawn here, from info (the Chumby can't draw text)."""
     img, d = panel_background(title, kind)
     x0, y0, x1, y1 = 10, 32, 310, 198
     d.rounded_rectangle([x0 * SS, y0 * SS, x1 * SS, y1 * SS], radius=10 * SS, fill=T["box"], outline=T["frame1"], width=SS)
     rh = (y1 - y0 - 8) / len(rows)
     lf, vf = f(VERD, 8), f(VERDB, 9)
-    for i, (label, value) in enumerate(rows):
-        y = (y0 + 4 + rh * i + rh / 2) * SS
+    live, bars = [], []
+    for i, (label, value, key) in enumerate(rows):
+        yc = y0 + 4 + rh * i + rh / 2
+        y = yc * SS
         if i:
             d.line([((x0 + 8) * SS, (y0 + 4 + rh * i) * SS), ((x1 - 8) * SS, (y0 + 4 + rh * i) * SS)], fill=T["frame2"], width=SS)
         d.text(((x0 + 10) * SS, y), label, font=lf, fill=T["sub"], anchor="lm")
         vx = x0 + 100
-        if label == "Signal" and info.get("quality", "").isdigit():
-            signal_bars(d, vx, y / SS + 5, signal_level(info), (60, 160, 70), T["frame2"])
+        if key == "wifi_pct":                                  # Signal: the bars, the percentage, then dBm if known
+            bars.append((vx - 2, round(yc + 5) - 10))
             vx += 22
+            live.append((key, vx, yc, 40))
+            vx += 44
+        elif key:
+            live.append((key, vx, yc, x1 - 10 - vx))
+            continue
+        if not value:
+            continue
         while vf.getlength(value) > (x1 - 10 - vx) * SS and len(value) > 4:
             value = value[:-2] + "…"
         d.text((vx * SS, y), value, font=vf, fill=T["text"], anchor="lm")
-    d.text((14 * SS, 218 * SS), info.get("asof", "Not read from the Chumby yet"), font=f(VERD, 7), fill=T["hint"], anchor="lm")
+    asof = info.get("asof")
+    d.text((14 * SS, 218 * SS), f"Live from the Chumby; the rest as it reported at {asof}" if asof else "Live from the Chumby",
+           font=f(VERD, 7), fill=T["hint"], anchor="lm")
     done_pill(d)
-    _, lines = screen_lines(out, rgb565, img, scr)
+    bg, lines = screen_lines(out, rgb565, img, scr)
+    for bx, by in bars:
+        lines += bars_pane(out, rgb565, bg, scr, (bx, by, 18, 11), 10)
+    for key, x, yc, w in live:
+        lines.append(f"live {scr} {key} {font} {x} {round(yc - cell_h / 2)} {w} {cell_h} left bg")
     lines.append(f"hot {scr} {DONE_BOX[0] - 6} {DONE_BOX[1] - 6} {DONE_BOX[2] - DONE_BOX[0] + 12} 40 screen settings")
     return lines

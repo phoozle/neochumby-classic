@@ -14,8 +14,9 @@ are dropped. Feed HTML is untrusted: it is parsed to plain text with html.parser
 ever drawn as pixels; names come from slot numbers.
 
 Files (stable slot names, written only when the pixels change, no per-run times). The
-prefix is "wn_", not the widget's id: the engine's screen names are at most 23
-characters, and "whyallanews_s11_p2_night" would be 24.
+prefix is "wn_", not the widget's id: the old engine's screen names were at most 23
+characters ("whyallanews_s11_p2_night" is 24). Today's allows 48, but renaming would only
+make every Chumby fetch these files again.
   wn_slide<k>[_night]       slideshow page k: masthead + 3 headlines with photos
   wn_l<k>[_night]           list page k: 4 rows of photo, headline, category and date
   wn_s<i>_p<j>[_night]      story i, page j: photo, headline, byline + date, text

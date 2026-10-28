@@ -71,7 +71,7 @@ CONFIG_SCHEMA = [
     {"key": "range", "type": "choice", "label": "Chart", "default": "1d",
      "choices": [["1d", "Today"], ["5d", "5 days"], ["1mo", "1 month"], ["6mo", "6 months"], ["1y", "1 year"]]},
     {"key": "max_details", "type": "number", "label": "Most stock pages", "default": 4, "min": 1, "max": 8,
-     "integer": True, "help": "The Chumby plays at most 48 pages in all."},
+     "integer": True, "help": "The Chumby plays at most 128 pages in all."},
 ]
 
 

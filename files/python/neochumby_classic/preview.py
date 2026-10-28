@@ -2,9 +2,11 @@
 
 For checking a design, and for the README's screenshots (tests/smoke.py --screenshots).
 A still: sprites show their first frame, scrolling layers their start, panes the frame
-for the given state.
+for the given state, and live boxes the given device values (EXAMPLE, made up, for the
+screenshots; a value not given is "?", or 0 bars).
 
 Usage: python -m neochumby_classic.preview OUTDIR page N|screen NAME OUT.png [var=value ...] [time=7:42PM]
+       (a var that is a live key, ip=192.0.2.7, sets that value)
 """
 import os
 import sys
@@ -12,10 +14,12 @@ import sys
 from PIL import Image, ImageChops
 
 from .output import unpack565
-from .widget import H, W
+from .widget import H, LIVE_CHARSET, LIVE_KEYS, W
 
 KEY = (255, 0, 255)            # 0xF81F, the transparent colour, after a round trip through RGB565
 GLYPHS = "0123456789: APM"
+EXAMPLE = {"wifi": "3", "wifi_pct": "68%", "ip": "192.0.2.7", "ssid": "Home WiFi", "uptime": "3d 4h",
+           "mem_free": "33.1 MB", "stick_free": "1.4 GB", "firmware": "1.7.3", "name": "kitchen"}
 
 
 def load(out, name, w, h):
@@ -35,7 +39,40 @@ def manifest(out):
         return [ln.split() for ln in fh.read().splitlines() if ln and not ln.startswith("#")]
 
 
-def page(out, n, night=False, clock="7:42 PM", ticker_at=260):
+def live_values(out, lines, img, target, values, base=None):
+    """Draw the panes and live boxes for `target` (a screen, page:N or pagenight:N) as the
+    engine would with these device values. base: the background picture, for BG "bg"."""
+    values = values or {}
+    fonts = {}
+    base = base or img.copy()
+    for t in lines:
+        if t[0] == "pane" and t[1] == target and t[7] in ("wifi", "wifi_pct"):
+            w, h, x, y, frames = int(t[3]), int(t[4]), int(t[5]), int(t[6]), int(t[8])
+            v = values.get(t[7], "0").rstrip("%")
+            fr = max(0, min(int(v) if v.isdigit() else 0, frames - 1))
+            img.paste(load(out, t[2], w, h * frames).crop((0, fr * h, w, fr * h + h)), (x, y))
+        elif t[0] == "livefont":
+            cw, ch = int(t[3]), int(t[4])
+            widths = [min(cw, int(v)) for v in t[5:]] or [cw] * len(LIVE_CHARSET)
+            fonts[t[1]] = (load(out, t[2], cw, ch * len(LIVE_CHARSET)), cw, ch, widths)
+        elif t[0] == "live" and t[1] == target and t[3] in fonts:
+            strip, cw, ch, widths = fonts[t[3]]
+            x, y, w, h = map(int, t[4:8])
+            text = values.get(t[2], "?")[:32]
+            idx = [LIVE_CHARSET.index(c) if c in LIVE_CHARSET else LIVE_CHARSET.index("?") for c in text]
+            box = base.crop((x, y, x + w, y + h)) if t[9] == "bg" else Image.new("RGB", (w, h), tuple(
+                int(t[9][i:i + 2], 16) for i in (1, 3, 5)))
+            tw = sum(widths[i] for i in idx)
+            px = {"left": 0, "right": w - tw, "center": int((w - tw) / 2)}[t[8]]
+            for i in idx:
+                g = strip.crop((0, i * ch, widths[i], i * ch + ch))
+                box.paste(g, (px, 0), keyed(g))
+                px += widths[i]
+            img.paste(box, (x, y))
+    return img
+
+
+def page(out, n, night=False, clock="7:42 PM", ticker_at=260, values=None):
     lines = manifest(out)
     n = str(n)
     mine = [t for t in lines if len(t) > 1 and t[1] == n]
@@ -58,6 +95,9 @@ def page(out, n, night=False, clock="7:42 PM", ticker_at=260):
             w, h, x, y = map(int, t[3:7])
             lg = load(out, t[2], w, h)
             img.paste(lg, (x, y), keyed(lg))
+    targets = {t[1] for t in lines if t[0] in ("pane", "live")}
+    target = f"pagenight:{n}" if night and f"pagenight:{n}" in targets else f"page:{n}"
+    live_values(out, lines, img, target, values)
     if "noclock" not in pg:
         c = next((t for t in lines if t[0] == "clock"), None)
         if c:
@@ -77,14 +117,17 @@ def page(out, n, night=False, clock="7:42 PM", ticker_at=260):
     return img
 
 
-def screen(out, name, state=None):
+def screen(out, name, state=None, values=None):
     state = dict({"music": 0, "station": 0, "night": 0, "pin": 0, "page": 0, "vol": 65}, **(state or {}))
     lines = manifest(out)
     s = next(t for t in lines if t[0] == "screen" and t[1] == name)
     img = load(out, s[2], W, H)
+    base = img.copy()
     for p in lines:
         if len(p) < 2 or p[1] != name:
             continue
+        if p[0] == "pane" and p[7] in ("wifi", "wifi_pct"):
+            continue                                   # live_values() draws these
         if p[0] == "pane":
             w, h, x, y = map(int, p[3:7])
             frames = int(p[8])
@@ -97,7 +140,7 @@ def screen(out, name, state=None):
             empty.paste(full.crop((t0, 0, kx, h)), (t0, 0))
             empty.paste(knob, (kx - kw // 2, (h - kh) // 2), keyed(knob))
             img.paste(empty, (x, y))
-    return img
+    return live_values(out, lines, img, name, values, base)
 
 
 def main(argv=None):
@@ -107,10 +150,12 @@ def main(argv=None):
         return 64
     out, kind, which, dst = a[:4]
     kv = dict(x.split("=", 1) for x in a[4:] if "=" in x)
+    values = {k: v for k, v in kv.items() if k in LIVE_KEYS}
     if kind == "page":
-        img = page(out, int(which), night=kv.get("night") == "1", clock=kv.get("time", "7:42 PM").replace("PM", " PM"))
+        img = page(out, int(which), night=kv.get("night") == "1", clock=kv.get("time", "7:42 PM").replace("PM", " PM"),
+                   values=values)
     else:
-        img = screen(out, which, {k: int(v) for k, v in kv.items() if v.isdigit()})
+        img = screen(out, which, {k: int(v) for k, v in kv.items() if v.isdigit() and k not in LIVE_KEYS}, values)
     img.save(dst)
     return 0
 

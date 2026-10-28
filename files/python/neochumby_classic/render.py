@@ -38,7 +38,8 @@ PAGE_BUDGET = 2 * 1024 * 1024  # bytes one page or screen may need in memory at 
 # Directives a widget may write (docs/widgets.md). The rest belong to this module.
 WIDGET_DIRECTIVES = {"page", "pagenight", "pagetap", "sprite", "actor", "screen", "pane", "hot", "slider",
                      "logofx", "scroller", "bgscroll", "glow", "glowseq", "clock", "clocknight", "ticker",
-                     "tickernight"}
+                     "tickernight", "livefont", "live"}
+LIVE_KEYS, CHARSET = widget.LIVE_KEYS, widget.LIVE_CHARSET
 ONCE = {"clock", "clocknight", "ticker", "tickernight"}     # global: the first widget's wins
 
 
@@ -72,18 +73,19 @@ def sun_lines(now, lat, lon, days=8):
 
 
 # ---------------------------------------------------------------- Settings -> Chumby Info
-# The keys of <state>/info/<chumby> (docs/interface.md, "Facts from the Chumby"). Other keys
-# are ignored, and a missing or empty one shows "?".
-INFO_KEYS = ("ssid", "ap", "rate", "signal", "quality", "ip", "mac", "gateway", "dns", "hostname", "firmware",
-             "kernel", "engine", "uptime_s", "memfree", "usb", "asof")
+# The keys of <state>/info/<chumby> (docs/interface.md, "Facts from the Chumby"): what the
+# Chumby can't read itself. The rest (its name, firmware, uptime, memory, USB stick, network,
+# IP address and signal) the engine reads on the Chumby and draws live (screens.py). Other
+# keys are ignored, and a missing or empty one shows "?".
+INFO_KEYS = ("ap", "rate", "signal", "mac", "gateway", "dns", "kernel", "engine", "asof")
 
 
 def chumby_info(path, facts):
-    """Facts about the Chumby for Settings -> Network and Chumby Info (and Home's signal
-    bars), from a key=value file with the INFO_KEYS, plus the widgets' facts (the weather's
-    observation time, as Feed). neochumby's companion is to write that file from the
-    Chumby's session; nothing writes it yet. Without it, or a key, the row shows "?".
-    No fact may change on every render: that would make the screen new every time."""
+    """Facts about the Chumby for Settings -> Network and Chumby Info that it can't read
+    itself, from a key=value file with the INFO_KEYS, plus the widgets' facts (the weather's
+    observation time, as Feed). neochumby's companion is to write that file; nothing writes
+    it yet. Without it, or a key, the row shows "?". No fact may change on every render:
+    that would make the screen new every time."""
     info = dict(facts)
     if not path:
         return info
@@ -95,31 +97,11 @@ def chumby_info(path, facts):
         return info
     raw = {k.strip(): "".join(ch for ch in v if ch.isprintable()).strip()[:80] for k, v in raw.items()}
     raw = {k: v for k, v in raw.items() if k in INFO_KEYS and v}
-    if not raw.get("quality", "").isdigit():               # a percentage, 0-100
-        raw.pop("quality", None)
     if not re.fullmatch(r"-?[0-9]{1,3}", raw.get("signal", "")):   # dBm
         raw.pop("signal", None)
-    info.update({k: v for k, v in raw.items() if k not in ("uptime_s", "memfree", "usb", "asof")})
-    try:
-        up = int(raw["uptime_s"])
-        d, h, m = up // 86400, up % 86400 // 3600, up % 3600 // 60
-        info["uptime"] = (f"{d} d " if d else "") + f"{h} h {m} min"
-    except (KeyError, ValueError):
-        pass
-    try:
-        free, total = map(int, raw["memfree"].split())
-        info["memory"] = f"{free / 1024:.1f} MB available of {total / 1024:.0f} MB"
-    except (KeyError, ValueError):
-        pass
-    try:
-        used, total = map(int, raw["usb"].split())
-        info["usb"] = f"{used / 1024:.1f} MB used of {total / 1024:.0f} MB"
-    except (KeyError, ValueError):
-        pass
+    info.update(raw)
     if "kernel" in info:
         info["kernel"] = f"Linux {info['kernel']}"
-    if "asof" in raw:
-        info["asof"] = f"As the Chumby reported at {raw['asof']}"
     return info
 
 
@@ -155,14 +137,17 @@ def check_lines(app, r, first, out):
         if t[0] in ("pagenight", "pagetap", "sprite", "actor", "logofx", "scroller", "bgscroll", "glow", "glowseq"):
             if len(t) < 3 or not t[1].isdigit() or not first <= int(t[1]) < first + len(pages):
                 raise WidgetError(f"{app}: {t[0]} for a page that isn't its own: {ln}")
+        m = re.fullmatch(r"page(?:night)?:(\d+)", t[1]) if t[0] in ("pane", "live") and len(t) > 1 else None
+        if m and not first <= int(m.group(1)) < first + len(pages):
+            raise WidgetError(f"{app}: {t[0]} for a page that isn't its own: {ln}")
         if "\n" in ln or len(ln) > 1000:
             raise WidgetError(f"{app}: bad line")
-        names = [t[1]] if t[0] in ("screen", "pane", "hot", "slider") and len(t) > 1 else []
+        names = [t[1]] if t[0] in ("screen", "pane", "hot", "slider", "live") and len(t) > 1 and not m else []
         names += [t[2]] if t[0] == "pagetap" and len(t) > 2 else []
         names += [t[-1]] if t[0] == "hot" and len(t) > 2 and t[-2] == "screen" else []
         bad = [n for n in names if not SCREEN_OK.fullmatch(n)]
         if bad:
-            raise WidgetError(f"{app}: screen name {bad[0]!r} isn't 1-23 letters, digits or '_'")
+            raise WidgetError(f"{app}: screen name {bad[0]!r} isn't 1-{limits.SCREEN_NAME} letters, digits or '_'")
         for tok in t:
             if tok.endswith((".raw", ".l8", ".path")):
                 if not FILE_OK.fullmatch(tok):
@@ -172,21 +157,88 @@ def check_lines(app, r, first, out):
 
 
 def check_limits(lines, out=None):
-    """Raises WidgetError if the manifest is over one of the engine's limits (limits.py).
-    With `out`, the number of different files it names is checked too."""
-    counts = {}
+    """Raises WidgetError if the manifest is over one of the engine's limits (limits.py), or
+    has a line the engine would skip: names too long, a pane or live box for a screen or page
+    not declared before it, a font or box out of bounds. With `out`, the files' sizes and
+    the number of different files are checked too."""
+    counts, over = {}, []
     for ln in lines:
         k = ln.split(" ", 1)[0]
         counts[k] = counts.get(k, 0) + 1
-    over = [f"{k} {counts[k]} > {n}" for k, n in LIMITS.items() if counts.get(k, 0) > n]
-    over += [f"glowseq {t[2]} has {t[3]} frames > {limits.GLOWSEQ_FRAMES}" for t in (ln.split() for ln in lines)
-             if t[:1] == ["glowseq"] and len(t) > 3 and t[3].isdigit() and int(t[3]) > limits.GLOWSEQ_FRAMES]
+    over += [f"{k} {counts[k]} > {n}" for k, n in LIMITS.items() if counts.get(k, 0) > n]
+    over += problems(lines, out)
     if out is not None:
         n = len(referenced_files(out, lines))
         if n > limits.ASSETS:
             over.append(f"files {n} > {limits.ASSETS}")
     if over:
-        raise WidgetError("over the engine's limits: " + ", ".join(over))
+        raise WidgetError("over the engine's limits: " + ", ".join(over[:10]))
+
+
+def _size(out, name):
+    try:
+        return os.path.getsize(os.path.join(out, name))
+    except OSError:
+        return None
+
+
+def problems(lines, out=None):
+    """The lines the engine would skip (engine-limits and live values, v1), as messages."""
+    bad, screens_seen, pages, fonts = [], set(), 0, set()
+    lo, hi = limits.COORD
+
+    def name_ok(n):
+        return bool(SCREEN_OK.fullmatch(n))
+
+    def target_ok(tg):
+        m = re.fullmatch(r"page(?:night)?:(\d+)", tg)
+        return int(m.group(1)) < pages if m else tg in screens_seen
+
+    for ln in lines:
+        t = ln.split()
+        if not t or t[0].startswith("#"):
+            continue
+        k = t[0]
+        try:
+            if k == "page":
+                pages += 1
+            elif k == "screen":
+                if not name_ok(t[1]):
+                    bad.append(f"screen name {t[1]!r}")
+                screens_seen.add(t[1])
+            elif k == "pagetap" and not name_ok(t[2]):
+                bad.append(f"pagetap {t[2]!r}")
+            elif k == "hot":
+                if len(t[6]) > limits.ACTION or (len(t) > 7 and len(t[7]) > limits.SCREEN_NAME):
+                    bad.append(f"hot {' '.join(t[6:])!r}")
+                if not all(lo <= int(v) <= hi for v in t[2:6]):
+                    bad.append(f"hot box {ln!r}")
+            elif k == "glowseq" and len(t[2]) > limits.GLOWSEQ_PREFIX or (k == "glowseq" and int(t[3]) > limits.GLOWSEQ_FRAMES):
+                bad.append(f"glowseq {t[2]}")
+            elif k == "pane":
+                w, h, x, y, frames = int(t[3]), int(t[4]), int(t[5]), int(t[6]), int(t[8])
+                if not target_ok(t[1]) or len(t[7]) > limits.PANE_VAR or min(w, h, frames) < 1 \
+                        or not all(lo <= v <= hi for v in (w, h, x, y)):
+                    bad.append(f"pane {ln!r}")
+                elif out is not None and _size(out, t[2]) != w * h * frames * 2:
+                    bad.append(f"pane file {t[2]} isn't {w}x{h}x{frames}")
+            elif k == "livefont":
+                cw, ch, widths = int(t[3]), int(t[4]), t[5:]
+                if not name_ok(t[1]) or not (1 <= cw <= 64 and 1 <= ch <= 64) or len(widths) not in (0, len(CHARSET)) \
+                        or not all(w.isdigit() for w in widths):
+                    bad.append(f"livefont {ln[:60]!r}")
+                elif out is not None and _size(out, t[2]) != cw * ch * len(CHARSET) * 2:
+                    bad.append(f"livefont file {t[2]} isn't {cw}x{ch * len(CHARSET)}")
+                fonts.add(t[1])
+            elif k == "live":
+                x, y, w, h = map(int, t[4:8])
+                if not target_ok(t[1]) or t[2] not in LIVE_KEYS or t[3] not in fonts or len(t) != 10 \
+                        or w < 1 or h < 1 or x < 0 or y < 0 or x + w > W or y + h > H \
+                        or t[8] not in ("left", "right", "center") or not re.fullmatch(r"bg|#[0-9A-Fa-f]{6}", t[9]):
+                    bad.append(f"live {ln!r}")
+        except (IndexError, ValueError):
+            bad.append(f"malformed {ln[:60]!r}")
+    return bad
 
 
 def memory_use(out, lines):
@@ -260,6 +312,9 @@ def finish(out, lines, now):
     body = "\n".join(lines) + "\n"
     meaning = "\n".join(ln for ln in lines if not ln.startswith("#"))
     digest = hashlib.sha256((hashes + meaning).encode()).hexdigest()[:16]
+    for name, data in (("hashes.txt", hashes), ("manifest.txt", body)):
+        if len(data.encode()) + 100 > limits.MANIFEST_BYTES:
+            raise WidgetError(f"{name} would be over {limits.MANIFEST_BYTES // 1048576} MB")
     old_version, old_digest = read_version(out)
     try:
         with open(os.path.join(out, "manifest.txt")) as fh:
@@ -369,9 +424,8 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
     app_titles, app_thumbs = [n for n, _ in apps], [thumbs[pg] for _, pg in apps]
     write = output.rgb565
     info = chumby_info(info_path, facts)
-    bars = screens.signal_level(info)                      # Home's bars match Settings > Network
-    man += screens.home(out, write, app_titles, app_thumbs, signal=bars)
-    man += screens.home(out, write, app_titles, app_thumbs, night=True, signal=bars)   # dark theme, shown in night mode
+    man += screens.home(out, write, app_titles, app_thumbs)
+    man += screens.home(out, write, app_titles, app_thumbs, night=True)    # dark theme, shown in night mode
     man += screens.settings(out, write, info)
     man += screens.settings(out, write, info, night=True)
     url = g["config_url"]                                  # Settings -> APPS: the QR code for the web page

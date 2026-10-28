@@ -26,6 +26,11 @@ from . import assets, output
 API_VERSION = 1
 GROUP = "neochumby_classic.widgets"
 W, H = 320, 240                                  # the Chumby's screen
+# Values the engine reads on the Chumby itself and draws without a render (docs/widgets.md,
+# "Live values"): `live` boxes show their text, and a `pane` can take wifi or wifi_pct as its
+# variable. LIVE_CHARSET is a `livefont` strip's 79 glyphs, in order.
+LIVE_KEYS = ("wifi", "wifi_pct", "ip", "ssid", "uptime", "mem_free", "stick_free", "firmware", "name")
+LIVE_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:%/-?_()+,'#&@!"
 
 
 @dataclasses.dataclass
