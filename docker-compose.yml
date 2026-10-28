@@ -1,0 +1,36 @@
+# neochumby-classic with Docker, instead of install.sh. neochumbyd itself runs on the host.
+#
+#   NEOCHUMBYD_UID=$(id -u neochumbyd) NEOCHUMBYD_GID=$(id -g neochumbyd) docker compose up -d
+#
+# Both containers run as neochumbyd's own user: its admin socket answers only that user and
+# root, and the renders then belong to it, so its companion can read them. That also means
+# they can read everything in neochumbyd's state directory (mounted read-only here), so
+# treat this like running them as neochumbyd. The owner token goes in ./owner-token
+# (`neochumbyd token > owner-token; chmod 600 owner-token`), and the state directory must
+# belong to that user: `sudo install -d -o neochumbyd -g neochumbyd /var/lib/neochumby-classic`.
+x-classic: &classic
+  build: .
+  user: "${NEOCHUMBYD_UID:?set NEOCHUMBYD_UID}:${NEOCHUMBYD_GID:?set NEOCHUMBYD_GID}"
+  restart: unless-stopped
+  volumes:
+    - ${CLASSIC_STATE:-/var/lib/neochumby-classic}:/state
+    - ${NEOCHUMBYD_STATE:-/var/lib/neochumbyd}:/neochumbyd:ro
+    - ${CLASSIC_ASSETS:-/etc/neochumby-classic/assets}:/assets:ro
+
+services:
+  renderer:
+    <<: *classic
+    command: ["neochumby-classic-renderer"]
+  web:
+    <<: *classic
+    command: ["neochumby-classic-web"]
+    ports:
+      - "8080:8080"
+    environment:
+      NEOCHUMBY_CLASSIC_OWNER_TOKEN_FILE: /run/secrets/owner-token
+    secrets:
+      - owner-token
+
+secrets:
+  owner-token:
+    file: ./owner-token
