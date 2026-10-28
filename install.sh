@@ -59,7 +59,7 @@ UNINSTALL=0
 PURGE=0
 WIDGETS=""
 
-need() { [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"; }
+need() { if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value"; fi; }
 while [ $# -gt 0 ]; do
 	case $1 in
 	--user) need "$@"; USER_NAME=$2; shift ;;
@@ -216,7 +216,7 @@ if [ "$ASK_TOKEN" = 1 ] || [ ! -s "$ETC/owner-token" ]; then
 			fi
 		fi
 		tries=$((tries + 1))
-		[ "$tries" -lt 3 ] && [ -t 0 ] || die "no usable owner token; re-run with --token"
+		if [ "$tries" -ge 3 ] || [ ! -t 0 ]; then die "no usable owner token; re-run with --token"; fi
 	done
 	umask 077
 	printf '%s\n' "$TOKEN" >"$ETC/owner-token.new"
