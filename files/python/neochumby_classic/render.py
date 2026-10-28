@@ -26,16 +26,14 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import assets, config, output, qrscreen, screens, widget
+from . import assets, config, limits, output, qrscreen, screens, widget
 
 W, H = widget.W, widget.H
-FILE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,62}")
-SCREEN_OK = re.compile(r"[A-Za-z0-9_]{1,23}")   # the engine reads screen names into 24 bytes, "_night" included
+FILE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,%d}" % (limits.FILE_NAME - 1))
+SCREEN_OK = re.compile(r"[A-Za-z0-9_]{1,%d}" % limits.SCREEN_NAME)   # "_night" included
 PRUNE_AFTER = 3600            # unnamed files and stale temp files older than this are removed
-# The engine's limits (MAXP, MAXSCR, ... on the Chumby). A render over one
-# of them is cut by the engine, so it is refused here instead (docs/widgets.md).
-LIMITS = {"page": config.MAXP, "screen": 160, "pane": 128, "hot": 768, "sprite": 64, "actor": 64,
-          "station": 16, "glow": 16, "glowseq": 4, "slider": 160}
+# The engine's limits (limits.py, docs/widgets.md). A render over one is refused, whole.
+LIMITS = limits.LIMITS
 PAGE_BUDGET = 2 * 1024 * 1024  # bytes one page or screen may need in memory at once
 # Directives a widget may write (docs/widgets.md). The rest belong to this module.
 WIDGET_DIRECTIVES = {"page", "pagenight", "pagetap", "sprite", "actor", "screen", "pane", "hot", "slider",
@@ -173,13 +171,20 @@ def check_lines(app, r, first, out):
                     raise WidgetError(f"{app}: names {tok}, which it didn't write")
 
 
-def check_limits(lines):
-    """Raises WidgetError if the manifest is over one of the engine's limits."""
+def check_limits(lines, out=None):
+    """Raises WidgetError if the manifest is over one of the engine's limits (limits.py).
+    With `out`, the number of different files it names is checked too."""
     counts = {}
     for ln in lines:
         k = ln.split(" ", 1)[0]
         counts[k] = counts.get(k, 0) + 1
     over = [f"{k} {counts[k]} > {n}" for k, n in LIMITS.items() if counts.get(k, 0) > n]
+    over += [f"glowseq {t[2]} has {t[3]} frames > {limits.GLOWSEQ_FRAMES}" for t in (ln.split() for ln in lines)
+             if t[:1] == ["glowseq"] and len(t) > 3 and t[3].isdigit() and int(t[3]) > limits.GLOWSEQ_FRAMES]
+    if out is not None:
+        n = len(referenced_files(out, lines))
+        if n > limits.ASSETS:
+            over.append(f"files {n} > {limits.ASSETS}")
     if over:
         raise WidgetError("over the engine's limits: " + ", ".join(over))
 
@@ -309,6 +314,7 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
               file=sys.stderr)
     reg = {a["id"]: a for a in config.registry()}
     lines, titles, thumbs, page_app, facts, home_titles, index = [], [], [], [], {}, {}, {}
+    latlon = None
     seen_once = set()
     entries = [e for e in config.channel(cfg, cid)["apps"] if e["enabled"] and e["app"] in reg]
     for e in entries:
@@ -334,6 +340,12 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
         facts.update({k: str(v)[:80] for k, v in (r.facts or {}).items()})
         if r.home_title:
             home_titles[a["id"]] = r.home_title
+        if latlon is None and r.latlon:
+            try:
+                la, lo = map(float, r.latlon)
+                latlon = (la, lo) if -90 <= la <= 90 and -180 <= lo <= 180 else None
+            except (TypeError, ValueError):
+                pass
         index[a["id"]] = [ln.split()[2] for ln in r.lines if ln.startswith("page ")]
     if not titles:
         img = empty_page()
@@ -341,7 +353,9 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
         lines.append("page 0 empty.raw 60 noclock noticker")
         titles, thumbs, page_app = ["Nothing to show"], [img], [""]
     g = cfg["general"]
-    man = sun_lines(now, g["latitude"], g["longitude"])
+    if g.get("latitude") is not None and g.get("longitude") is not None:
+        latlon = (g["latitude"], g["longitude"])           # the owner's place wins over a widget's
+    man = sun_lines(now, *latlon) if latlon else []        # no place yet: night mode can't follow the sun
     man += lines
     # Home browses apps, not pages: number the apps in play order and tell the engine each page's app
     apps = []                                              # (name, first page)
@@ -365,7 +379,7 @@ def render(out, cfg, chumby=None, info_path=None, now=None):
     man += qrscreen.configure(out, write, url, night=True)
     screens.T = screens.LIGHT
     man += screens.music(out, write, screens.get_stations())
-    check_limits(man)
+    check_limits(man, out)
     for (kind, name), n in sorted(memory_use(out, man).items()):
         if n > PAGE_BUDGET:
             print(f"render: {kind} {name} needs {n // 1024} KB at once, over the {PAGE_BUDGET // 1024} KB budget",

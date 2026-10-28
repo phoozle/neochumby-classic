@@ -35,14 +35,17 @@ class Rendered:
     lines       manifest directives (docs/widgets.md lists the ones a widget may use)
     titles      one title per slideshow page it added, in order (Home shows them)
     thumbs      one 320x240 PIL image per slideshow page it added (Home's thumbnail)
-    home_title  the name on Home's card, if not APP["name"] (Weather: "Whyalla Weather")
+    home_title  the name on Home's card, if not APP["name"] (Weather: "<town> Weather")
     facts       short facts for Settings -> Chumby Info, e.g. {"feed": "weather of ..."}
+    latlon      the place it shows, (latitude, longitude), for the sunrise and sunset that
+                drive night mode when the owner hasn't set them (Weather: its station's)
     """
     lines: list = dataclasses.field(default_factory=list)
     titles: list = dataclasses.field(default_factory=list)
     thumbs: list = dataclasses.field(default_factory=list)
     home_title: str = None
     facts: dict = dataclasses.field(default_factory=dict)
+    latlon: tuple = None
 
 
 @dataclasses.dataclass

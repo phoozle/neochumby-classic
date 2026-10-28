@@ -147,7 +147,19 @@ table.ch td{border-top:1px dashed #ccc;padding:6px 4px;vertical-align:middle}tab
 JS = r"""
 document.documentElement.classList.remove('nojs');
 function openDlg(id){document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));
-  var m=document.getElementById('cz-'+id);if(m){m.classList.add('open');history.replaceState(null,'','?customize='+id)}}
+  var m=document.getElementById('cz-'+id);if(m){m.classList.add('open');history.replaceState(null,'','?customize='+id);suggest(m)}}
+// fields with a list to pick from (the weather's stations and towns): the list follows the
+// choices above it (the state), fetched from /api/choices when the dialog opens or they change
+function suggest(box){box.querySelectorAll('[data-suggest]').forEach(function(inp){
+  var q=new URLSearchParams({app:inp.dataset.app,key:inp.dataset.suggest});
+  inp.form.querySelectorAll('select[name^="opt."]').forEach(function(s){q.set(s.name,s.value)});
+  fetch('/api/choices?'+q).then(function(r){return r.json()}).then(function(j){
+    var dl=document.getElementById(inp.getAttribute('list'));dl.textContent='';
+    (j.choices||[]).forEach(function(c){var o=document.createElement('option');o.value=c[0];o.textContent=c[1];dl.appendChild(o)})
+  }).catch(function(){})})}
+document.addEventListener('change',function(e){if(e.target.matches('select[name^="opt."]')&&e.target.form.querySelector('[data-suggest]')){
+  e.target.form.querySelectorAll('[data-suggest]').forEach(function(i){i.value=''});suggest(e.target.form)}});
+document.querySelectorAll('.modal.open').forEach(suggest);
 function closeDlg(){document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));history.replaceState(null,'','/')}
 document.addEventListener('click',function(e){
   var t=e.target.closest('[data-open]');if(t){e.preventDefault();openDlg(t.dataset.open);return}
@@ -210,8 +222,10 @@ document.querySelectorAll('.card[draggable]').forEach(function(c){
 """
 
 
-def field_html(app_id, fld, value, err):
+def field_html(app_id, fld, value, err, choices=None):
+    """One option's form field. choices: a "suggest" field's list, [[value, label], ...]."""
     k, t, name = fld["key"], fld["type"], f"opt.{fld['key']}"
+    value = "" if value is None else value
     out = [f'<div class="f"><span>{h(fld["label"])}</span>']
     if t == "image_library":
         return library_html(app_id, fld, value, err)
@@ -237,6 +251,16 @@ def field_html(app_id, fld, value, err):
         attrs = "".join(f' {a}="{h(fld[a])}"' for a in ("min", "max") if fld.get(a) is not None)
         out.append(f'<input type="number" name="{h(name)}" value="{h(value)}"{attrs}'
                    f'{" step=1" if fld.get("integer") else " step=any"} style="width:6em">')
+    elif fld.get("suggest"):                                    # pick from a list, or type
+        dl = f"dl-{h(app_id)}-{h(k)}"
+        out.append(f'<input type="text" name="{h(name)}" value="{h(value)}" maxlength="{h(fld.get("max_len", 200))}" '
+                   f'list="{dl}" data-suggest="{h(k)}" data-app="{h(app_id)}" autocomplete="off" style="width:100%">'
+                   f'<datalist id="{dl}">')
+        out += [f'<option value="{h(v)}">{h(label)}</option>' for v, label in choices or []]
+        out.append("</datalist>")
+        now = next((label for v, label in choices or [] if v == value), None)
+        if now:
+            out.append(f'<div class="help">Now: {h(now)}</div>')
     else:
         out.append(f'<input type="text" name="{h(name)}" value="{h(value)}" maxlength="{h(fld.get("max_len", 200))}" style="width:100%">')
     if fld.get("help"):
@@ -313,7 +337,7 @@ def dialog(a, e, is_open, errors=None, form=None):
                + (f'<div class="e">{h(errors["seconds"])}</div>' if "seconds" in errors else "") + "</div>")
     for fld in a["schema"]:
         val = (form or {}).get(fld["key"], e["options"].get(fld["key"]))
-        out.append(field_html(aid, fld, val, errors.get(fld["key"])))
+        out.append(field_html(aid, fld, val, errors.get(fld["key"]), suggestions(a, fld, e["options"], fetch=False)))
     out.append('<button class="btn done">Done</button></form>')
     for fld in a["schema"]:
         if fld["type"] == "image_library":
@@ -695,6 +719,21 @@ DONE = {   # ?done=KEY after a successful POST: fixed messages, never text from 
     "upload": "Pictures added to {app}.",
 }
 SAVE_LOCK = threading.Lock()
+CHOICES_LOCK = threading.Lock()                # one list fetch at a time
+
+
+def suggestions(a, fld, options, fetch):
+    """A "suggest" field's list from its widget's choices() hook: [[value, label], ...], or []."""
+    fn = getattr(a.get("module"), "choices", None)
+    if not fld.get("suggest") or not fn:
+        return []
+    try:
+        with CHOICES_LOCK:
+            got = fn(fld["key"], options, fetch=fetch) or []
+        return [[str(v)[:64], str(label)[:80]] for v, label in got[:3000]]
+    except Exception as e:
+        print(f"web: {a['id']}.choices({fld['key']}): {e!r}", file=sys.stderr)
+        return []
 
 
 def done_flash(q):
@@ -1093,6 +1132,13 @@ class Handler(BaseHTTPRequestHandler):
             reg = [{k: v for k, v in a.items() if k not in ("module", "icon_path")} for a in config.registry()]
             return self.send(200, json.dumps({"apps": reg, "general": config.GENERAL_SCHEMA, "maxp": config.MAXP}, indent=2),
                              "application/json")
+        if p == "/api/choices":                               # a "suggest" field's list (the dialog's script)
+            a = config.app_info((q.get("app") or [""])[0])
+            fld = next((f for f in a["schema"] if f["key"] == (q.get("key") or [""])[0]), None) if a else None
+            if not fld or not fld.get("suggest"):
+                return self.send(404, json.dumps({"choices": []}), "application/json")
+            opts, _ = config.validate(a["schema"], {k[4:]: v[0] for k, v in q.items() if k.startswith("opt.")})
+            return self.send(200, json.dumps({"choices": suggestions(a, fld, opts, fetch=True)}), "application/json")
         if p == "/api/status":
             cfg = config.load(ARGS.config)
             kept, dropped = config.plan(cfg)

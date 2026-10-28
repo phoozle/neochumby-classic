@@ -26,7 +26,7 @@ the user can switch off or reorder in the app's "customize" dialog, plus its own
       },
       "chumbys": {"kitchen": "default"},         # a Chumby's channel, if not "channel"
       "general": {"config_url": "http://neochumbyd.local:8080/", "timezone": "Australia/Adelaide",
-                  "latitude": -33.0328, "longitude": 137.5648}
+                  "latitude": null, "longitude": null}  # null: the weather station's
     }
 
 Only the "default" channel exists for now; more channels later is a data change.
@@ -35,9 +35,13 @@ Only the "default" channel exists for now; more channels later is a data change.
 Option fields (a widget's CONFIG_SCHEMA, and GENERAL_SCHEMA below):
 {"key", "type", "label", "default", "help"} with type list (of strings: "pattern",
 "max_items", "upper"), string ("pattern", "max_len"), bool, choice ("choices": [[value,
-label], ...]), number ("min", "max", "integer") or image_library (below). The web page
-builds forms from these, and validate() is the only gate between a form (or a hand-edited
-file) and the renderer.
+label], ...]), number ("min", "max", "integer") or image_library (below). A string or
+number field with "optional": True may also be left blank ("" or None). A string field
+with "suggest": True gets a list to pick from on the web page: the module's
+choices(key, options, fetch) hook. The web page builds forms from these, and validate()
+is the only gate between a form (or a hand-edited file) and the renderer. A module's
+optional migrate(options) -> options hook turns an older version's stored options into
+the current ones before they are validated.
 
 IMAGE LIBRARIES (the interface the Photos widget builds on; keep it stable):
     field   {"key": "photos", "type": "image_library", "label": "Photos", "default": [],
@@ -60,7 +64,7 @@ IMAGE LIBRARIES (the interface the Photos widget builds on; keep it stable):
     client's file name anywhere. Ids in a saved form are only accepted if they were already
     in the library, so a form can reorder or drop images but never point at arbitrary files.
 
-The engine plays at most MAXP = 48 slideshow pages. plan() expands enabled apps x enabled
+The engine plays at most MAXP slideshow pages (limits.py). plan() expands enabled apps x enabled
 sub-slides in channel order and drops whatever doesn't fit, so the renderer truncates
 predictably and the web page can say exactly what was dropped.
 
@@ -75,25 +79,26 @@ import re
 import sys
 import tempfile
 
-from . import output, widget
+from . import limits, output, widget
 
 DEFAULT_STATE = "/var/lib/neochumby-classic"
 DEFAULT_PATH = os.path.join(DEFAULT_STATE, "config.json")
 # Sent with every fetch. Some sources refuse requests without a browser-like agent.
 USER_AGENT = "Mozilla/5.0 (compatible; neochumby-classic; +https://github.com/phoozle/neochumby-classic)"
 DEFAULT_TZ = "Australia/Adelaide"
-MAXP = 48                      # the engine's slideshow page limit (MAXP on the Chumby)
+MAXP = limits.MAXP             # the engine's slideshow page limit (limits.py)
 
 # in the registry but switched off in a fresh config: an empty photo library has nothing
-# to show, and its pages would crowd the slideshow.
-DEFAULT_OFF = {"photos"}
+# to show, and its pages would crowd the slideshow; Whyalla News is one town's paper (an
+# optional widget: owners add it from "add apps").
+DEFAULT_OFF = {"photos", "whyallanews"}
 ORDER = ["weather", "news", "whyallanews", "stocks", "photos", "aurora"]   # default play order of whatever exists
 IMAGE_ID = r"[A-Za-z0-9_-]{1,64}"
 CHUMBY_NAME = r"[a-z0-9_-]{1,32}"                           # neochumbyd's names for Chumbys
 CHANNEL_ID = r"[a-z0-9_-]{1,24}"
 
-# Whyalla, South Australia, is only the example default: night mode needs a place for the
-# sun. The weather widget has its own place, in its options.
+# Night mode needs a place for the sun: these, if set, else the Weather widget's station.
+OLD_DEFAULT_LATLON = (-33.0328, 137.5648)   # what earlier versions saved for everyone: treated as unset
 GENERAL_SCHEMA = [
     {"key": "config_url", "type": "string", "label": "Address in the Settings QR code",
      "default": "http://neochumbyd.local:8080/", "max_len": 120,
@@ -101,9 +106,10 @@ GENERAL_SCHEMA = [
      "help": "Where phones go when they scan the code on the Chumby: this page's address."},
     {"key": "timezone", "type": "string", "label": "Time zone", "default": DEFAULT_TZ, "max_len": 40,
      "pattern": r"[A-Za-z_]+(/[A-Za-z0-9_+\-]+){0,2}", "help": "For the clock and the times on pages (Australia/Sydney)."},
-    {"key": "latitude", "type": "number", "label": "Latitude", "default": -33.0328, "min": -90, "max": 90,
-     "help": "For sunrise and sunset, which switch night mode on and off."},
-    {"key": "longitude", "type": "number", "label": "Longitude", "default": 137.5648, "min": -180, "max": 180},
+    {"key": "latitude", "type": "number", "label": "Latitude", "default": None, "min": -90, "max": 90, "optional": True,
+     "help": "For sunrise and sunset, which switch night mode on and off. Blank: the Weather app's station's."},
+    {"key": "longitude", "type": "number", "label": "Longitude", "default": None, "min": -180, "max": 180,
+     "optional": True},
 ]
 SECONDS = (5, 120)             # allowed seconds per slide
 
@@ -176,6 +182,9 @@ def validate(schema, raw):
         if k not in raw:
             continue
         v = raw[k]
+        if fld.get("optional") and t in ("string", "number") and (v is None or str(v).strip() == ""):
+            clean[k] = "" if t == "string" else None
+            continue
         try:
             if t == "bool":
                 clean[k] = v if isinstance(v, bool) else str(v).lower() in ("1", "true", "on", "yes")
@@ -281,7 +290,7 @@ def normalise(cfg):
                 continue
             a = reg[e["app"]]
             seen.add(a["id"])
-            opts, _ = validate(a["schema"], e.get("options"))
+            opts, _ = validate(a["schema"], migrate(a, e.get("options")))
             secs, _ = validate_seconds(e.get("seconds", a["seconds"]), a["seconds"])
             apps.append({"app": a["id"], "enabled": e.get("enabled", True) is not False, "seconds": secs,
                          "subslides": normalise_subslides(a, e.get("subslides")), "options": opts})
@@ -299,11 +308,24 @@ def normalise(cfg):
                 for k in ("latitude", "longitude"):
                     if k in e["options"]:
                         general.setdefault(k, e["options"][k])
+    if (general.get("latitude"), general.get("longitude")) == OLD_DEFAULT_LATLON:
+        general["latitude"] = general["longitude"] = None
     out["general"], _ = validate(GENERAL_SCHEMA, general)
     raw = cfg.get("chumbys") if isinstance(cfg.get("chumbys"), dict) else {}
     out["chumbys"] = {n: c for n, c in raw.items()
                       if isinstance(n, str) and re.fullmatch(CHUMBY_NAME, n) and c in out["channels"]}
     return out
+
+
+def migrate(a, options):
+    """A widget's stored options, through its migrate() hook if it has one."""
+    fn = getattr(a.get("module"), "migrate", None)
+    if fn and isinstance(options, dict):
+        try:
+            return fn(dict(options))
+        except Exception as e:
+            print(f"config: {a['id']}: migrate failed: {e}", file=sys.stderr)
+    return options
 
 
 def load(path=None):

@@ -84,37 +84,58 @@ def logo(sym):
     return buf.getvalue()
 
 
-def bom_observations(now, wmo):
+# Two states' worth of BOM products: real station ids, names and places, made-up readings.
+# Whyalla is the tests' example place (it is not a default anywhere).
+STATIONS = {   # observations product -> [(wmo-id, description, lat, lon, forecast district)]
+    "IDS60920": [("94648", "Adelaide (West Terrace /  ngayirdapira)", -34.9257, 138.5832, "SA_PW001"),
+                 ("95664", "Whyalla", -33.0539, 137.5206, "SA_PW012"),
+                 ("94659", "Neptune Island", -35.3364, 136.1186, "SA_PW012")],
+    "IDN60920": [("94768", "Sydney - Observatory Hill", -33.8593, 151.2048, "NSW_PW005"),
+                 ("94926", "Canberra", -35.3088, 149.2003, "NSW_PW017"),
+                 ("94938", "Montague Island", -36.2514, 150.2275, "NSW_PW012")],
+}
+TOWNS = {      # précis forecast product -> [(aac, description, district)]
+    "IDS10044": [("SA_PT001", "Adelaide", "SA_PW001"), ("SA_PT055", "Whyalla", "SA_PW012"),
+                 ("SA_PT033", "Port Lincoln", "SA_PW012")],
+    "IDN11060": [("NSW_PT131", "Sydney", "NSW_PW005"), ("NSW_PT027", "Canberra", "NSW_PW017")],
+    "IDN10035": [("NSW_PT027", "Canberra", "NSW_ME006")],
+}
+
+
+def bom_observations(now, pid):
     t = now.strftime("%Y-%m-%dT%H:%M:00+10:30")
-    els = {"apparent_temp": "19.4", "air_temperature": "21.3", "rel-humidity": "48", "wind_dir": "SSW",
-           "wind_spd_kmh": "19", "gust_kmh": "28", "msl_pres": "1016.2", "rainfall": "0.0",
-           "maximum_air_temperature": "24.1", "minimum_air_temperature": "12.8", "weather": "-", "cloud": "Partly cloudy"}
-    e = "".join(f'<element units="" type="{k}">{v}</element>' for k, v in els.items())
-    return (f'<?xml version="1.0"?><product><observations>'
-            f'<station wmo-id="00000" stn-name="ELSEWHERE"><period index="0" time-local="{t}"><level index="0">'
-            f'<element type="air_temperature">5.0</element></level></period></station>'
-            f'<station wmo-id="{wmo}" stn-name="TOWN AERO"><period index="0" time-local="{t}"><level index="0">{e}'
-            f'</level></period></station></observations></product>').encode()
+    out = []
+    for k, (wmo, desc, lat, lon, dist) in enumerate(STATIONS[pid]):
+        els = {"apparent_temp": f"{19.4 + k}", "air_temperature": f"{21.3 + k * 2}", "rel-humidity": f"{48 + k}",
+               "wind_dir": "SSW", "wind_spd_kmh": "19", "gust_kmh": "28", "msl_pres": "1016.2", "rainfall": "0.0",
+               "maximum_air_temperature": "24.1", "minimum_air_temperature": "12.8", "weather": "-", "cloud": "Partly cloudy"}
+        e = "".join(f'<element units="" type="{k}">{v}</element>' for k, v in els.items())
+        out.append(f'<station wmo-id="{wmo}" bom-id="0{wmo}" tz="Australia/Adelaide" stn-name="{desc.upper()}" '
+                   f'lat="{lat}" lon="{lon}" forecast-district-id="{dist}" description="{desc}">'
+                   f'<period index="0" time-local="{t}"><level index="0">{e}</level></period></station>')
+    return f'<?xml version="1.0"?><product><observations>{"".join(out)}</observations></product>'.encode()
 
 
 PRECIS = ["Partly cloudy.", "Shower or two. Light winds.", "Sunny.", "Possible thunderstorm. Windy.",
           "Mostly sunny.", "Cloudy. Chance of rain.", "Fog then sunny.", "Hazy sunshine and a gusty wind."]
 
 
-def bom_forecast(now, aac):
-    days = []
-    for i in range(7):
-        d = (now + dt.timedelta(days=i)).strftime("%Y-%m-%dT05:00:00+10:30")
-        code = [3, 11, 1, 16, 1, 4, 6, 9][i]
-        lo = "" if i == 0 else f'<element type="air_temperature_minimum" units="Celsius">{10 + i}</element>'
-        days.append(f'<forecast-period index="{i}" start-time-local="{d}">'
-                    f'<element type="forecast_icon_code">{code}</element>{lo}'
-                    f'<element type="air_temperature_maximum" units="Celsius">{22 + i}</element>'
-                    f'<text type="precis">{PRECIS[i]}</text>'
-                    f'<text type="probability_of_precipitation">{(i * 17) % 90}%</text></forecast-period>')
-    return (f'<?xml version="1.0"?><product><forecast><area aac="SA_PT001" description="Elsewhere" type="location">'
-            f'</area><area aac="{aac}" description="Town" type="location">{"".join(days)}</area>'
-            f'</forecast></product>').encode()
+def bom_forecast(now, pid):
+    areas = []
+    for t, (aac, desc, dist) in enumerate(TOWNS[pid]):
+        days = []
+        for i in range(7):
+            d = (now + dt.timedelta(days=i)).strftime("%Y-%m-%dT05:00:00+10:30")
+            code = [3, 11, 1, 16, 1, 4, 6, 9][(i + t) % 8]
+            lo = "" if i == 0 else f'<element type="air_temperature_minimum" units="Celsius">{10 + i + t}</element>'
+            days.append(f'<forecast-period index="{i}" start-time-local="{d}">'
+                        f'<element type="forecast_icon_code">{code}</element>{lo}'
+                        f'<element type="air_temperature_maximum" units="Celsius">{22 + i + t}</element>'
+                        f'<text type="precis">{PRECIS[(i + t) % len(PRECIS)]}</text>'
+                        f'<text type="probability_of_precipitation">{(i * 17) % 90}%</text></forecast-period>')
+        areas.append(f'<area aac="{dist}" description="District" type="public-district"></area>'
+                     f'<area aac="{aac}" description="{desc}" type="location" parent-aac="{dist}">{"".join(days)}</area>')
+    return f'<?xml version="1.0"?><product><forecast>{"".join(areas)}</forecast></product>'.encode()
 
 
 HEADLINES = ["Council approves new playground for the foreshore", "Rain gauge overflows after a wet weekend",
@@ -241,10 +262,12 @@ def somafm(url):
 def answer(url, now):
     u = urllib.parse.urlsplit(url)
     host, path = u.hostname or "", u.path
-    if u.scheme == "ftp" and host == "ftp.bom.gov.au":
-        if path.endswith("IDS60920.xml") or "obs" in path:
-            return bom_observations(now, FAKE["wmo"])
-        return bom_forecast(now, FAKE["aac"])
+    if u.scheme == "ftp" and host == "ftp.bom.gov.au" and path.startswith("/anon/gen/fwo/"):
+        pid = path.rsplit("/", 1)[1].removesuffix(".xml")
+        if pid in STATIONS:
+            return bom_observations(now, pid)
+        if pid in TOWNS:
+            return bom_forecast(now, pid)
     if host.endswith("finance.yahoo.com"):
         return yahoo_chart(url, now)
     if host in ("financialmodelingprep.com", "assets.parqet.com"):
@@ -270,9 +293,6 @@ def answer(url, now):
     raise urllib.error.URLError(f"fakenet: no canned answer for {url}")
 
 
-FAKE = {"wmo": "95664", "aac": "SA_PT055"}
-
-
 class _Resp(io.BytesIO):
     def __enter__(self):
         return self
@@ -281,12 +301,8 @@ class _Resp(io.BytesIO):
         self.close()
 
 
-def install(now, wmo=None, aac=None):
+def install(now):
     """Freeze the clock at `now` and answer every fetch from the made-up data above."""
-    if wmo:
-        FAKE["wmo"] = wmo
-    if aac:
-        FAKE["aac"] = aac
     when = now
 
     def urlopen(req, *a, **kw):

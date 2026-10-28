@@ -1,8 +1,8 @@
 # neochumby-classic
 
 The classic Chumby experience for [neochumby](https://github.com/johnmerchant/neochumby):
-a 90s weather channel, ABC News, the Whyalla News, stock quotes, your photos and a Vista-style aurora
-screensaver, with Home, Settings and Music screens, and a "my channels" web page modelled
+a 90s weather channel for anywhere in Australia, ABC News, stock quotes, your photos and a
+Vista-style aurora screensaver (and, if you add it, the Whyalla News), with Home, Settings and Music screens, and a "my channels" web page modelled
 on chumby.com's.
 
 The Chumby (a 266 MHz ARM with no FPU) only copies pictures to its screen. Everything hard
@@ -68,9 +68,13 @@ sudo ./install.sh            # add --heif to accept iPhone HEIC photos
 4. writes and starts two systemd services, `neochumby-classic-renderer` and
    `neochumby-classic-web`, with their settings in `/etc/neochumby-classic/env`.
 
-Then open `http://<server>:8080/` on your phone or computer. Under **Chumby settings**, set
-the address the Chumby's QR code should show, your time zone and your latitude and
-longitude (for night mode); under the Weather app's **customize**, your place.
+Then open `http://<server>:8080/` on your phone or computer. Under the Weather app's
+**customize**, choose your state, then the weather station nearest you from the list (the
+forecast town is the one with the station's name, or pick another). Until you do, the
+Chumby shows a page saying where to choose it. Under **Chumby settings**, set the address
+the Chumby's QR code should show and your time zone. Night mode follows the sunrise and
+sunset at your weather station; set a latitude and longitude there only to use another
+place.
 
 Re-run `install.sh` to upgrade (after `git pull`) or to change an option (`--help` lists
 them); it keeps the settings it was given before. `sudo ./install.sh --token` stores a new
@@ -129,6 +133,11 @@ install.sh remembers `--assets` and pulls again whenever it is re-run. `--assets
 another repository (your own copies, say), and `--uninstall --purge` removes the directory.
 They replace the placeholders at the next render.
 
+Its `weather-badge.png` is the original **Whyalla** Weather badge: it names that town, whatever
+place you choose. Unless you live there, delete it from the asset directory (or keep your own
+copy without it, with `--assets URL`), and the weather pages draw their own badge with your
+place's name.
+
 You can also use pictures of your own: put them in `/etc/neochumby-classic/assets/`
 (`NEOCHUMBY_CLASSIC_ASSETS`), readable by the service user, under these names:
 
@@ -136,7 +145,7 @@ You can also use pictures of your own: put them in `/etc/neochumby-classic/asset
 | --- | --- | --- |
 | `logo.png` | the aurora's logo (RGBA, about 220 × 64) | a "neochumby" wordmark |
 | `octopus.png` | the mark on Home, Settings and the leave dialog (RGBA) | a drawn octopus |
-| `weather-badge.png` | the weather pages' badge, top left (RGBA) | a drawn sun and cloud |
+| `weather-badge.png` | the weather pages' badge, top left (RGBA, about 5:4) | our badge: your place's name, a sun and cloud, WEATHER |
 | `raysclip.png` | the aurora's light rays | no rays |
 | `abc-logo.png`, `abc-swirls.png` | the news header | a plain NEWS mark |
 | `whyallanews-wordmark.png` | Whyalla News' masthead (its alpha is the mask, recoloured per theme) | the paper's name in Liberation Sans Bold |
@@ -155,15 +164,16 @@ your own home, and certainly before anyone redistributes what it draws.
 
 | Source | Used by | To check |
 | --- | --- | --- |
-| Bureau of Meteorology, anonymous FTP (`ftp.bom.gov.au/anon/gen/fwo/`) | Weather, the ticker | BOM's copyright and data terms for display and redistribution. Its website blocks scrapers; the FTP products are the sanctioned route |
+| Bureau of Meteorology, anonymous FTP (`ftp.bom.gov.au/anon/gen/fwo/`): each state's observations and précis town forecasts | Weather, the ticker, the web page's station and town lists | BOM's copyright and data terms for display and redistribution. Its website blocks scrapers; the FTP products are the sanctioned route |
 | ABC News RSS, and ABC article pages (`abc.net.au`) | News | ABC's RSS terms (personal, non-commercial use). The Eyre Peninsula page and the article bodies are **scraped**, which the terms may not allow |
 | The Whyalla News' WordPress RSS feed (`whyallanewsonline.com.au/feed/`) and the photos it links | Whyalla News | The paper's terms. The widget reads only the RSS feed (the site refuses scripts, and it doesn't try to get round that) and **respects the paywall**: a subscriber-only story shows only the free excerpt the feed carries, ending "Continue at whyallanewsonline.com.au"; full text only where the feed itself carries it |
 | Yahoo Finance's chart endpoint (`query1.finance.yahoo.com/v8/finance/chart`) | Stocks | Unofficial and undocumented. Yahoo's terms allow personal use, not redistribution |
 | financialmodelingprep.com, assets.parqet.com | Stock logos | Unofficial. The logos are the companies' trademarks; they are fetched and cached on your server, never committed |
 | SomaFM's API and streams | Music | SomaFM's terms for its API and channel artwork |
 
-The weather defaults to Whyalla, South Australia, only as an example. Whyalla News is that
-town's paper: switch it off on the web page if it isn't yours.
+The weather has no default place: you choose it. Whyalla (South Australia) appears only as an
+example, in the help text and the tests. The Whyalla News is that town's paper, an optional
+widget: it is off until you add it from "add apps" on the web page.
 
 ## Widgets
 

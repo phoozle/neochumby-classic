@@ -1,19 +1,30 @@
-"""weather: the Weather widget, a 90s-weather-channel look for the Bureau of Meteorology's data.
+"""weather: the Weather widget: Australian weather from the Bureau of Meteorology, for any
+place in Australia, in a 90s weather channel's look.
 
 Pages (each with a dark copy for night mode):
   weather_current, weather_local, weather_extended   320x240 page backgrounds, clock area left blank
   weather_<page>_icon<N>                             animated icon sprite sheets (frames stacked
                                                      vertically, 0xF81F = transparent)
+  weather_setup                                      until a place is chosen: where to choose it
 and, for the whole slideshow, the clock and the ticker the engine draws over these pages:
   clock.raw, clock_night.raw     glyph cells for "0123456789: APM", on the header background
   ticker.raw, ticker_night.raw   a long 24 px strip the engine scrolls: the weather now and the
                                  next three days' forecasts (weather only: news has its own apps)
 
 BOM's website blocks scrapers and points to its anonymous FTP, so observations and forecasts
-come from there, by product id (the options below).
+come from there: each state's observations product (every station's latest reading, with
+its wmo-id, name, latitude and longitude) and its précis town forecasts (each town's aac).
+The owner picks a state, then a station from that state's list, on the web page (the
+choices() hook); the forecast town is the one with the station's name unless they pick
+another. The station's latitude and longitude also drive night mode (Rendered.latlon).
+There is no default place: until one is chosen, the widget shows where to choose it.
 """
 import datetime as dt
 import math
+import os
+import re
+import sys
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -23,35 +34,57 @@ from .. import assets, config
 from ..widget import Rendered
 
 API = 1
-APP = {"id": "weather", "name": "Weather", "icon": "icons/weather.png", "seconds": 12,
-       "description": "Weather from the Bureau of Meteorology for the place you set, with a scrolling weather ticker.",
+APP = {"id": "weather", "name": "Australian Weather", "icon": "icons/weather.png", "seconds": 12,
+       "description": "Weather from the Bureau of Meteorology for any place in Australia, with a scrolling weather ticker.",
        "subslides": [{"id": "current", "label": "Current Conditions", "default": True},
                      {"id": "local", "label": "Local Forecast", "default": True},
                      {"id": "extended", "label": "Extended Forecast", "default": True}]}
 
-# Whyalla, South Australia, is only the example default: any Australian place with a BOM
-# observation station and a town forecast works. The ids are in BOM's anonymous FTP products
-# (ftp://ftp.bom.gov.au/anon/gen/fwo/): the state's observations product names each
-# station's wmo-id, and its town forecast product each place's aac.
+# BOM's anonymous FTP products (ftp://ftp.bom.gov.au/anon/gen/fwo/), per state and territory:
+# (name, observations, précis town forecasts, the observations' district for this state).
+# The ACT's stations are in New South Wales' observations (district NSW_PW017), and its
+# town forecast (Canberra) is a product of its own.
+STATES = {
+    "ACT": ("Australian Capital Territory", "IDN60920", "IDN10035", "NSW_PW017"),
+    "NSW": ("New South Wales", "IDN60920", "IDN11060", None),
+    "NT": ("Northern Territory", "IDD60920", "IDD10207", None),
+    "QLD": ("Queensland", "IDQ60920", "IDQ11295", None),
+    "SA": ("South Australia", "IDS60920", "IDS10044", None),
+    "TAS": ("Tasmania", "IDT60920", "IDT16710", None),
+    "VIC": ("Victoria", "IDV60920", "IDV10753", None),
+    "WA": ("Western Australia", "IDW60920", "IDW14199", None),
+}
 CONFIG_SCHEMA = [
-    {"key": "location", "type": "string", "label": "Place name", "default": "Whyalla", "max_len": 20,
-     "pattern": r"[A-Za-z][A-Za-z .'\-]{0,19}", "help": "Shown on the pages and the ticker."},
-    {"key": "obs_product", "type": "string", "label": "BOM observations product", "default": "IDS60920",
-     "max_len": 8, "pattern": r"ID[A-Z][0-9]{5}",
-     "help": "The state's observations XML (South Australia: IDS60920; New South Wales: IDN60920)."},
-    {"key": "obs_station", "type": "string", "label": "Observation station (wmo-id)", "default": "95664",
-     "max_len": 5, "pattern": r"[0-9]{5}", "help": "The station's wmo-id in that product."},
-    {"key": "forecast_product", "type": "string", "label": "BOM town forecasts product", "default": "IDS10044",
-     "max_len": 8, "pattern": r"ID[A-Z][0-9]{5}", "help": "The state's town forecasts XML (South Australia: IDS10044)."},
-    {"key": "forecast_area", "type": "string", "label": "Forecast area (aac)", "default": "SA_PT055",
-     "max_len": 10, "pattern": r"[A-Z]{2,3}_[A-Z]{2}[0-9]{3}", "help": "The place's aac in that product."},
+    {"key": "state", "type": "choice", "label": "State or territory", "default": "",
+     "choices": [["", "Choose one"]] + [[k, v[0]] for k, v in STATES.items()],
+     "help": "Then pick the weather station nearest you: the list below follows the state."},
+    {"key": "station", "type": "string", "label": "Weather station", "default": "", "optional": True, "suggest": True,
+     "max_len": 5, "pattern": r"[0-9]{5}",
+     "help": "Pick one from the list (the state's observation stations), or type a station's wmo-id (Whyalla: 95664)."},
+    {"key": "forecast_area", "type": "string", "label": "Forecast town", "default": "", "optional": True, "suggest": True,
+     "max_len": 10, "pattern": r"[A-Z]{2,3}_[A-Z]{2}[0-9]{3}",
+     "help": "Blank: the town with the station's name. Or pick one from the list, or type its aac (Whyalla: SA_PT055)."},
+    {"key": "name", "type": "string", "label": "Name on the pages", "default": "", "optional": True, "max_len": 20,
+     "pattern": r"[A-Za-z][A-Za-z .'\-]{0,19}", "help": "Blank: the station's name."},
 ]
+OLD_KEYS = ("location", "obs_product", "obs_station", "forecast_product", "forecast_area")
+
+
+def migrate(opts):
+    """Options from before the state picker (BOM product ids and a place name) -> today's."""
+    if "obs_station" not in opts or "station" in opts:
+        return opts
+    state = next((k for k, v in STATES.items() if (v[1], v[2]) == (opts.get("obs_product"), opts.get("forecast_product"))),
+                 None) or next((k for k, v in STATES.items() if v[1] == opts.get("obs_product")), "")
+    return {"state": state, "station": opts.get("obs_station", ""), "forecast_area": opts.get("forecast_area", ""),
+            "name": opts.get("location", "")}
+
 
 W, H = 320, 240
 UA = config.USER_AGENT
-# The place: the widget's options, applied by set_location() before anything is drawn.
 BOM_FTP = "ftp://ftp.bom.gov.au/anon/gen/fwo/{}.xml"
-LOC = {}
+LIST_TTL = 86400               # the web page's station and town lists: a day old is fine
+LOC = {"name": ""}             # the place being drawn (render() sets it)
 KEY = (255, 0, 255)                                                     # sprite colour key (0xF81F)
 
 # Bundled open fonts, metric-compatible with the Arial the pages were designed in, so every
@@ -96,41 +129,73 @@ TICKER_Y, TICKER_H = 216, 24
 _logo = {}
 
 
-def set_location(opts):
-    """The widget's options (CONFIG_SCHEMA) -> LOC, what the pages read."""
-    o = dict(config.defaults(CONFIG_SCHEMA), **(opts or {}))
-    LOC.update(name=o["location"], obs_url=BOM_FTP.format(o["obs_product"]), wmo=o["obs_station"],
-               fcst_url=BOM_FTP.format(o["forecast_product"]), aac=o["forecast_area"])
+def fit_font(text, path, width, size, smallest):
+    """The largest font from `size` down to `smallest` that fits `text` in `width` px."""
+    for n in range(size, smallest - 1, -1):
+        f = ImageFont.truetype(path, n)
+        if f.getlength(text) <= width:
+            return f
+    return ImageFont.truetype(path, smallest)
 
 
-set_location(None)
+def ellipsize_to(text, f, width):
+    while f.getlength(text) > width and len(text) > 2:
+        text = text[:-2].rstrip() + "…"
+    return text
 
 
-def badge():
-    """The weather pages' badge when no weather-badge.png is supplied: a sun behind a
-    cloud on a navy tile with an orange rim, drawn at 4x and shrunk."""
+def badge(name=""):
+    """The weather pages' badge when no weather-badge.png is supplied, drawn at 4x and shrunk:
+    on a navy tile with an orange rim, the place's name across the top, and a sun behind a
+    cloud beside WEATHER under it (without a name: the sun and cloud over WEATHER). The same
+    size as the original badge, so the pages' layout doesn't move."""
     k, w, h = 4, 120, 96
     im = Image.new("RGBA", (w * k, h * k), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle([2 * k, 2 * k, (w - 2) * k, (h - 2) * k], radius=16 * k, fill=(30, 40, 120), outline=(230, 120, 20),
                         width=5 * k)
-    draw_sun(d, 48 * k, 40 * k, 52 * k, 0.3)
-    draw_cloud(d, 70 * k, 58 * k, 56 * k)
+
+    def text(xy, s, f, fill, anchor):
+        d.text((xy[0] + 2 * k, xy[1] + 2 * k), s, font=f, fill=(0, 0, 0, 200), anchor=anchor)
+        d.text(xy, s, font=f, fill=fill, anchor=anchor)
+    town = name.upper().strip()
+    if town:
+        f = fit_font(town, NARROW, 102 * k, 40 * k, 24 * k)
+        words = town.split()
+        if f.getlength(town) > 102 * k and len(words) > 1:      # two lines: "ALICE / SPRINGS"
+            cut = min(range(1, len(words)), key=lambda n: abs(len(" ".join(words[:n])) - len(" ".join(words[n:]))))
+            rows = [" ".join(words[:cut]), " ".join(words[cut:])]
+            f = min((fit_font(r, NARROW, 102 * k, 24 * k, 14 * k) for r in rows), key=lambda x: x.size)
+            rows = [ellipsize_to(r, f, 102 * k) for r in rows]
+            text((60 * k, 26 * k), rows[0], f, (255, 255, 255, 255), "ms")
+            text((60 * k, 48 * k), rows[1], f, (255, 255, 255, 255), "ms")
+        else:
+            f = fit_font(town, NARROW, 102 * k, 40 * k, 16 * k)
+            text((60 * k, 44 * k), ellipsize_to(town, f, 102 * k), f, (255, 255, 255, 255), "ms")
+        draw_sun(d, 22 * k, 62 * k, 22 * k, 0.3)
+        draw_cloud(d, 30 * k, 72 * k, 24 * k)
+        text((46 * k, 82 * k), "WEATHER", fit_font("WEATHER", BOLD, 64 * k, 30 * k, 10 * k), (255, 230, 60, 255), "ls")
+    else:
+        draw_sun(d, 52 * k, 30 * k, 34 * k, 0.3)
+        draw_cloud(d, 66 * k, 44 * k, 36 * k)
+        text((60 * k, 84 * k), "WEATHER", fit_font("WEATHER", BOLD, 102 * k, 30 * k, 10 * k), (255, 230, 60, 255), "ms")
     return im.resize((w, h), Image.LANCZOS)
 
 
 def header_logo(h=34):
-    """The badge, dimmed in the night theme (its white and yellow would glare)."""
-    if THEME not in _logo:
+    """The badge (an owner's weather-badge.png, else ours with the place's name), dimmed in
+    the night theme (its white and yellow would glare)."""
+    key = (THEME, LOC["name"], h)
+    if key not in _logo:
         path = assets.find("weather-badge.png")
-        src = Image.open(path).convert("RGBA") if path else badge()
+        src = Image.open(path).convert("RGBA") if path else badge(LOC["name"])
         im = src.resize((round(src.width * h / src.height), h), Image.LANCZOS)
         if LOGO_DIM != 1.0:
             r, g, b, a = im.split()
             r, g, b = (c.point(lambda v: int(v * LOGO_DIM)) for c in (r, g, b))
             im = Image.merge("RGBA", (r, g, b, a))
-        _logo[THEME] = im
-    return _logo[THEME]
+        _logo[key] = im
+    return _logo[key]
 CLOCK_R, CLOCK_Y = W - 6, 22   # the device right-aligns the time to CLOCK_R
 
 
@@ -141,30 +206,114 @@ def font(size, path=BOLD):
 def fetch(url):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
+        return r.read(8_000_000)
+
+
+def cache_dir():
+    """The widget's cache: the renderer's ctx.state_dir, which the web page reads too."""
+    return os.path.join(config.state_dir(), "widgets", "weather")
+
+
+def product(pid, cache, ttl=0, fetch_ok=True):
+    """A BOM product's XML. ttl=0: fetch it now (the renderer), falling back to the cached
+    copy if BOM can't be reached; ttl>0: the cached copy if it's younger (the web page).
+    fetch_ok=False: only ever the cached copy, or None. Every fetch refreshes the cache."""
+    path = os.path.join(cache, pid + ".xml") if cache else None
+    cached = path and os.path.isfile(path)
+    if cached and (not fetch_ok or (ttl and time.time() - os.path.getmtime(path) < ttl)):
+        with open(path, "rb") as fh:
+            return fh.read()
+    if not fetch_ok:
+        return None
+    try:
+        data = fetch(BOM_FTP.format(pid))
+        ET.fromstring(data)                                       # only keep what parses
+    except Exception as e:
+        if not cached:
+            raise
+        print(f"weather: {pid} unavailable ({e}); using the last copy", file=sys.stderr)
+        with open(path, "rb") as fh:
+            return fh.read()
+    if path:
+        os.makedirs(cache, exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    return data
 
 
 # ---------------------------------------------------------------- data
-def get_obs():
-    """The location's latest observation, mapped to the keys the pages use."""
-    root = ET.fromstring(fetch(LOC["obs_url"]))
-    st = next(s for s in root.iter("station") if s.get("wmo-id") == LOC["wmo"])
-    per = next(st.iter("period"))
-    e = {x.get("type"): x.text for x in per.iter("element")}
+def stations(xml, district=None):
+    """[{wmo, name, lat, lon, district}] in an observations product, by name."""
+    out = []
+    for s in ET.fromstring(xml).iter("station"):
+        wmo, name = s.get("wmo-id") or "", (s.get("description") or s.get("stn-name") or "").strip()
+        if not re.fullmatch(r"[0-9]{5}", wmo) or not name or (district and s.get("forecast-district-id") != district):
+            continue
+        try:
+            lat, lon = float(s.get("lat")), float(s.get("lon"))
+        except (TypeError, ValueError):
+            lat = lon = None
+        out.append({"wmo": wmo, "name": name, "lat": lat, "lon": lon, "district": s.get("forecast-district-id") or ""})
+    return sorted(out, key=lambda x: x["name"].lower())
+
+
+def towns(xml):
+    """[{aac, name, district}]: the forecast towns in a précis product, by name."""
+    out = [{"aac": a.get("aac"), "name": (a.get("description") or "").strip(), "district": a.get("parent-aac") or ""}
+           for a in ET.fromstring(xml).iter("area") if a.get("type") == "location" and a.get("aac")]
+    return sorted(out, key=lambda x: x["name"].lower())
+
+
+def short_name(name):
+    """A station's name as a place: "Sydney - Observatory Hill" -> "Sydney", "Darwin Airport" -> "Darwin"."""
+    s = re.split(r" - | \(|,", name)[0]
+    s = re.sub(r"\s+(Airport|Aero|AWS|Ap|Airfield|RAAF|Amo)\b.*$", "", s, flags=re.I).strip()
+    return s or name
+
+
+def _words(s):
+    return re.sub(r"[^a-z0-9 ]+", " ", (s or "").lower()).split()
+
+
+def match_town(station, town_list):
+    """The forecast town for a station: the one with its name, or its name without the
+    "Airport" or " - Observatory Hill" part; else one in the station's district whose name
+    starts with the same word. None if nothing fits (the owner then picks one)."""
+    by_name = {" ".join(_words(t["name"])): t for t in town_list}
+    for cand in (station["name"], short_name(station["name"])):
+        t = by_name.get(" ".join(_words(cand)))
+        if t:
+            return t
+    first = _words(short_name(station["name"]))[:1]
+    return next((t for t in town_list if first and _words(t["name"])[:1] == first
+                 and t["district"] == station["district"]), None)
+
+
+def get_obs(xml, wmo):
+    """(the station's latest observation, mapped to the keys the pages use, and the station),
+    or (None, None) if the product has no such station."""
+    st = next((s for s in ET.fromstring(xml).iter("station") if s.get("wmo-id") == wmo), None)
+    if st is None:
+        return None, None
+    info = next((s for s in stations(xml) if s["wmo"] == wmo), {"wmo": wmo, "name": wmo, "lat": None, "lon": None,
+                                                                "district": ""})
+    per = next(st.iter("period"), None)
+    e = {x.get("type"): x.text for x in per.iter("element")} if per is not None else {}
     num = lambda k: float(e[k]) if e.get(k) not in (None, "") else None
-    return {"air_temp": num("air_temperature"), "apparent_t": e.get("apparent_temp", "--"),
-            "rel_hum": e.get("rel-humidity", "--"), "wind_dir": e.get("wind_dir", ""),
-            "wind_spd_kmh": e.get("wind_spd_kmh", "--"), "gust_kmh": e.get("gust_kmh", "--"),
-            "press": e.get("msl_pres", "--"), "rain_trace": e.get("rainfall", "--"),
-            "weather": e.get("weather"), "cloud": e.get("cloud"),
-            "max": e.get("maximum_air_temperature"), "min": e.get("minimum_air_temperature"),
-            "time": per.get("time-local", "")}
+    return ({"air_temp": num("air_temperature"), "apparent_t": e.get("apparent_temp", "--"),
+             "rel_hum": e.get("rel-humidity", "--"), "wind_dir": e.get("wind_dir", ""),
+             "wind_spd_kmh": e.get("wind_spd_kmh", "--"), "gust_kmh": e.get("gust_kmh", "--"),
+             "press": e.get("msl_pres", "--"), "rain_trace": e.get("rainfall", "--"),
+             "weather": e.get("weather"), "cloud": e.get("cloud"),
+             "max": e.get("maximum_air_temperature"), "min": e.get("minimum_air_temperature"),
+             "time": per.get("time-local", "") if per is not None else ""}, info)
 
 
-def get_forecast():
-    root = ET.fromstring(fetch(LOC["fcst_url"]))
-    for a in root.iter("area"):
-        if a.get("aac") == LOC["aac"]:
+def get_forecast(xml, aac):
+    for a in ET.fromstring(xml).iter("area"):
+        if a.get("aac") == aac:
             days = []
             for p in a.findall("forecast-period"):
                 v = {e.get("type"): (e.text or "") for e in p}
@@ -172,6 +321,24 @@ def get_forecast():
                 days.append(v)
             return days
     return []
+
+
+def choices(key, options, fetch=False):
+    """The web page's lists for the station and forecast town (CONFIG_SCHEMA "suggest"):
+    [[value, label], ...] for the state in `options`, from the cached products (fetch=True:
+    fetched if a day old or missing). [] when there is no state or no list yet."""
+    st = STATES.get((options or {}).get("state"))
+    if not st or key not in ("station", "forecast_area"):
+        return []
+    try:
+        if key == "station":
+            xml = product(st[1], cache_dir(), LIST_TTL, fetch)
+            return [[s["wmo"], s["name"]] for s in stations(xml, st[3])] if xml else []
+        xml = product(st[2], cache_dir(), LIST_TTL, fetch)
+        return [[t["aac"], t["name"]] for t in towns(xml)] if xml else []
+    except Exception as e:
+        print(f"weather: no {key} list for {options.get('state')}: {e}", file=sys.stderr)
+        return []
 
 
 # ---------------------------------------------------------------- drawing helpers
@@ -403,9 +570,8 @@ def clock_cells(now):
     return sheet, cw, ch, widths
 
 
-def ticker_strip(obs, fc):
+def ticker_parts(obs, fc):
     """The weather pages' crawl: weather only (news lives in the news apps)."""
-    f = font(14)
     parts = [f"{LOC['name'].upper()} NOW {obs.get('air_temp', '--')}°C  {obs.get('wind_dir', '')} {obs.get('wind_spd_kmh', '--')} km/h",
              f"HUMIDITY {obs.get('rel_hum', '--')}%  GUSTS {obs.get('gust_kmh', '--')} km/h"]
     for k, day in enumerate(fc[:3]):
@@ -414,6 +580,11 @@ def ticker_strip(obs, fc):
         lo, hi = (None if v in ("", "--", None) else v for v in (lo, hi))   # BOM drops today's max at night
         temps = f"  {lo}° / {hi}°" if lo and hi else f"  MAX {hi}°" if hi else f"  MIN {lo}°" if lo else ""
         parts.append(f"{name}: {day.get('precis', '').rstrip('.').upper()}{temps}")
+    return parts
+
+
+def ticker_strip(parts):
+    f = font(14)
     text = "     •     ".join(parts) + "     •     "
     wpx = int(f.getlength(text)) + W
     img = Image.new("RGB", (wpx, TICKER_H))
@@ -422,60 +593,124 @@ def ticker_strip(obs, fc):
     return img
 
 
+def page_setup(url, problem, now):
+    """Until a place is chosen: where to choose it, with a QR code of the web page."""
+    from .. import qrscreen
+    img = base_page("Choose your", "location", now)
+    panel(img, (8, 48, W - 9, 208))
+    d = ImageDraw.Draw(img)
+    lines = ([problem, ""] if problem else []) + [
+        "Choose your state and the", "weather station nearest", "you: the Weather app's", "\"customize\" on the web page:"]
+    y = 58 if not problem else 54
+    for ln in lines:
+        stext(d, (18, y), ln, font(13), YELLOW if problem and ln == problem else WHITE, shadow=1)
+        y += 18 if ln else 6
+    addr = re.sub(r"^https?://", "", url or "").rstrip("/")
+    if addr:
+        f = fit_font(addr, NARROW, 196, 14, 9)
+        stext(d, (18, 188), addr, f, YELLOW, shadow=1)
+        q, ok = qrscreen.qr_image(url, 92)
+        if ok:                                    # no QR encoder: the address alone will do
+            img.paste(q, (W - 9 - 8 - q.width, 56))
+    return img
+
+
+def no_forecast(img):
+    """Over a forecast page's empty panels: the forecast town wasn't found."""
+    d = ImageDraw.Draw(img)
+    stext(d, (W // 2, 110), "No forecast town for this station", font(14), YELLOW, anchor="ma")
+    stext(d, (W // 2, 132), "Pick one on the web page.", font(13), WHITE, anchor="ma")
+    return img
+
+
 # the sub-slides: id -> Home title, renderer
 WEATHER_SLIDES = {
     "current": ("Current Conditions", lambda obs, fc, now: page_current(obs, fc, now)),
-    "local": ("Local Forecast", lambda obs, fc, now: page_local(fc, now)),
-    "extended": ("Extended Forecast", lambda obs, fc, now: page_extended(fc, now)),
+    "local": ("Local Forecast", lambda obs, fc, now: page_local(fc, now) if fc else (no_forecast(page_local(fc, now)[0]), [])),
+    "extended": ("Extended Forecast",
+                 lambda obs, fc, now: page_extended(fc, now) if fc else (no_forecast(page_extended(fc, now)[0]), [])),
 }
 
 
+def place(options, cache):
+    """(obs, fc, station) for the chosen place, or (None, None, why) if there isn't one yet."""
+    st = STATES.get(options.get("state"))
+    if not st:
+        return None, None, None
+    wmo = options.get("station") or ""
+    if not wmo:
+        return None, None, None
+    obs, station = get_obs(product(st[1], cache), wmo)
+    if obs is None:
+        return None, None, f"Station {wmo} isn't in {options['state']}'s list."
+    xml = product(st[2], cache)
+    aac = options.get("forecast_area") or (match_town(station, towns(xml)) or {}).get("aac")
+    return obs, get_forecast(xml, aac) if aac else [], station
+
 
 def render(ctx):
-    """API 1: the pages ctx.slides asks for, plus the clock and the ticker."""
+    """API 1: the pages ctx.slides asks for (or, with no place chosen yet, a page saying where
+    to choose it), plus the clock and the ticker."""
     if not ctx.slides:
         return Rendered()
-    set_location(ctx.options)
     now = ctx.now
-    obs, fc = get_obs(), get_forecast()
-    r = Rendered(home_title=f"{LOC['name']} Weather")
+    obs, fc, station = place(ctx.options, ctx.state_dir)
     p = ctx.first_page
-    for sid, _pages in ctx.slides:
-        title, draw = WEATHER_SLIDES[sid]
-        img, icons = draw(obs, fc, now)
-        name = f"weather_{sid}"                        # stable per sub-slide, whatever the play order
-        ctx.write565(img, f"{name}.raw")
-        r.lines.append(f"page {p} {name}.raw {ctx.seconds}")
-        set_theme("night")                             # the dark copy the engine draws in night mode
-        nimg, _ = draw(obs, fc, now)
+    if obs is None:
+        LOC["name"] = ""
+        r = Rendered(home_title="Weather")
+        img = page_setup(ctx.config_url, station, now)
+        ctx.write565(img, "weather_setup.raw")
+        set_theme("night")
+        nimg = page_setup(ctx.config_url, station, now)
         set_theme("day")
-        ctx.write565(nimg, f"{name}_night.raw")
-        r.lines.append(f"pagenight {p} {name}_night.raw")
-        for k, (kind, size, x, y) in enumerate(icons):
-            frames = 8
-            ctx.write565(icon_frames(kind, size, frames), f"{name}_icon{k}.raw")
-            r.lines.append(f"sprite {p} {name}_icon{k}.raw {size} {size} {frames} {x} {y} 8")
-        r.titles.append(title)
+        ctx.write565(nimg, "weather_setup_night.raw")
+        r.lines += [f"page {p} weather_setup.raw {ctx.seconds}", f"pagenight {p} weather_setup_night.raw"]
+        r.titles.append("Choose your location")
         r.thumbs.append(img)
-        p += 1
+        parts = ["WEATHER: CHOOSE YOUR LOCATION ON THE WEB PAGE"]
+    else:
+        LOC["name"] = ctx.options.get("name") or short_name(station["name"])
+        r = Rendered(home_title=f"{LOC['name']} Weather")
+        if station.get("lat") is not None:
+            r.latlon = (station["lat"], station["lon"])
+        for sid, _pages in ctx.slides:
+            title, draw = WEATHER_SLIDES[sid]
+            img, icons = draw(obs, fc, now)
+            name = f"weather_{sid}"                        # stable per sub-slide, whatever the play order
+            ctx.write565(img, f"{name}.raw")
+            r.lines.append(f"page {p} {name}.raw {ctx.seconds}")
+            set_theme("night")                             # the dark copy the engine draws in night mode
+            nimg, _ = draw(obs, fc, now)
+            set_theme("day")
+            ctx.write565(nimg, f"{name}_night.raw")
+            r.lines.append(f"pagenight {p} {name}_night.raw")
+            for k, (kind, size, x, y) in enumerate(icons):
+                frames = 8
+                ctx.write565(icon_frames(kind, size, frames), f"{name}_icon{k}.raw")
+                r.lines.append(f"sprite {p} {name}_icon{k}.raw {size} {size} {frames} {x} {y} 8")
+            r.titles.append(title)
+            r.thumbs.append(img)
+            p += 1
+        parts = ticker_parts(obs, fc)
+        try:
+            r.facts["feed"] = "weather of " + dt.datetime.fromisoformat(obs["time"]).strftime("%-d %b %Y, %-I:%M %p")
+        except (KeyError, TypeError, ValueError):
+            pass
     clk, cw, ch, widths = clock_cells(now)
     ctx.write565(clk, "clock.raw")
     r.lines.append(f"clock clock.raw {cw} {ch} {CLOCK_R} {CLOCK_Y} " + " ".join(map(str, widths)))
-    tk = ticker_strip(obs, fc)
+    tk = ticker_strip(parts)
     ctx.write565(tk, "ticker.raw")
     r.lines.append(f"ticker ticker.raw {tk.size[0]} {TICKER_H} {TICKER_Y} 2")
     # the same glyphs and strip on the night header and ticker band (same sizes: the engine
     # checks), used on the pages drawn from their pagenight
     set_theme("night")
     nclk, ncw, nch, nwidths = clock_cells(now)
-    ntk = ticker_strip(obs, fc)
+    ntk = ticker_strip(parts)
     set_theme("day")
     if (ncw, nch, nwidths) == (cw, ch, widths) and ntk.size == tk.size:
         ctx.write565(nclk, "clock_night.raw")
         ctx.write565(ntk, "ticker_night.raw")
         r.lines += ["clocknight clock_night.raw", "tickernight ticker_night.raw"]
-    try:
-        r.facts["feed"] = "weather of " + dt.datetime.fromisoformat(obs["time"]).strftime("%-d %b %Y, %-I:%M %p")
-    except (KeyError, TypeError, ValueError):
-        pass
     return r

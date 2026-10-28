@@ -14,6 +14,11 @@ published), so the run is the same everywhere. It checks that:
   - Whyalla News keeps to the paywall: a subscriber-only story shows only its excerpt and
     a "Continue at" line, a full-text story its text, never a form, script or off-site link;
   - Settings -> Network and Chumby Info show "?" for every fact the Chumby hasn't reported;
+  - the weather: with no place chosen, a page saying where to choose it (and nothing
+    fetched); a place in another state (NSW) and the ACT; the forecast town matched by name
+    or chosen; the sun times from the station; old options migrated; renders that change
+    nothing write nothing;
+  - limits.py and docs/widgets.md's table of the engine's limits agree;
   - the engine's limits and the per-page memory budget hold;
   - a second render with the same data writes nothing at all (no file, no mtime);
   - a change re-renders only what it touches, and the version goes up;
@@ -114,6 +119,8 @@ def renders(work, out, shots):
         e["enabled"] = True
         if e["app"] == "photos":
             e["options"]["library"] = ids
+        if e["app"] == "weather":                         # the tests' example place
+            e["options"].update(state="SA", station="95664")
     config.save(cfg)
     kept, dropped = config.plan(config.load())
     check(not dropped, f"plan fits the page limit ({sum(s['pages'] for s in kept)} pages)")
@@ -236,6 +243,88 @@ def whyalla(work, out):
     check(len(story) >= 2 * len(items[:8]), f"whyallanews: {len(story)} story screens, light and night")
     check(not any(f.startswith(".wncache") for f in os.listdir(out)), "whyallanews: caches stay out of the render")
     check(dt2.datetime.now(NOW.tzinfo) == NOW, "the clock is still frozen")
+
+
+# ---------------------------------------------------------------- the weather, anywhere in Australia
+def weather_places(work):
+    from neochumby_classic import config, render, limits
+    from neochumby_classic.widgets import weather as wx
+
+    def channel(options=None, general=None):
+        cfg = config.default_config()
+        for e in config.channel(cfg)["apps"]:
+            e["enabled"] = e["app"] == "weather"
+            if e["app"] == "weather" and options is not None:
+                e["options"] = options
+        cfg["general"].update(general or {})
+        return config.normalise(cfg)
+
+    def run(name, cfg):
+        out = os.path.join(work, "wx", name)
+        n = len(fakenet.REQUESTS)
+        render.render(out, cfg, "kitchen", now=NOW)
+        return out, manifest(out), fakenet.REQUESTS[n:]
+
+    fresh = config.default_config()
+    check(config.app_options(fresh, "weather")["state"] == "" and fresh["general"]["latitude"] is None,
+          "weather: a fresh config has no place, and no latitude")
+    check(not next(e for e in config.channel(fresh)["apps"] if e["app"] == "whyallanews")["enabled"],
+          "whyallanews: off in a fresh channel (owners add it)")
+    out, lines, asked = run("unset", channel())
+    pages = [t for t in lines if t[0] == "page"]
+    check([t[2] for t in pages] == ["weather_setup.raw"] and not any(t[0] == "sun" for t in lines)
+          and not any("bom.gov.au" in u for u in asked),
+          "weather: no place yet: one 'choose your location' page, nothing fetched, no sun times")
+    check(any(t[0] == "ticker" for t in lines) and any(t == ["pagenight", "0", "weather_setup_night.raw"] for t in lines),
+          "weather: ...with its night copy, the clock and the ticker")
+
+    sydney = {"state": "NSW", "station": "94768"}
+    out, lines, asked = run("nsw", channel(sydney))
+    pages = [t[2] for t in lines if t[0] == "page"]
+    check(pages == ["weather_current.raw", "weather_local.raw", "weather_extended.raw"]
+          and sorted(u.rsplit("/", 1)[1] for u in asked if "bom.gov.au" in u) == ["IDN11060.xml", "IDN60920.xml"],
+          "weather: New South Wales from its own products")
+    check(wx.LOC["name"] == "Sydney", f"weather: the station's name as the place: {wx.LOC['name']!r}")
+    sun = [" ".join(t) for t in lines if t[0] == "sun"]
+    check(sun == render.sun_lines(NOW, -33.8593, 151.2048), "weather: the sun times are the station's")
+    obs, fc, st = wx.place(sydney, os.path.join(work, "wxcache"))
+    want = wx.get_forecast(fakenet.bom_forecast(NOW, "IDN11060"), "NSW_PT131")
+    check(fc == want and fc, "weather: the forecast town matched by name (Sydney - Observatory Hill -> Sydney)")
+    before = snapshot(out)
+    time.sleep(0.05)
+    changed = render.render(out, channel(sydney), "kitchen", now=NOW)
+    diff = sorted(f for f, v in snapshot(out).items() if before.get(f) != v)
+    check(not changed and not diff, f"weather: a second render of another state writes nothing {diff[:5]}")
+    _, lines, _ = run("own-latlon", channel(sydney, {"latitude": -12.5, "longitude": 130.8}))
+    check([" ".join(t) for t in lines if t[0] == "sun"] == render.sun_lines(NOW, -12.5, 130.8),
+          "weather: the owner's latitude and longitude win over the station's")
+
+    _, fc, _ = wx.place({"state": "SA", "station": "94659"}, os.path.join(work, "wxcache"))
+    check(fc == [], "weather: a station with no town of its name has no forecast")
+    _, fc, _ = wx.place({"state": "SA", "station": "94659", "forecast_area": "SA_PT033"}, os.path.join(work, "wxcache"))
+    check(fc and fc == wx.get_forecast(fakenet.bom_forecast(NOW, "IDS10044"), "SA_PT033"), "weather: ...until one is chosen")
+    _, lines, _ = run("wrong", channel({"state": "SA", "station": "94768"}))
+    check([t[2] for t in lines if t[0] == "page"] == ["weather_setup.raw"], "weather: a station from another state: choose again")
+
+    stations = wx.choices("station", {"state": "ACT"}, fetch=True)
+    check(stations == [["94926", "Canberra"]] and wx.choices("forecast_area", {"state": "ACT"}, fetch=True) == [["NSW_PT027", "Canberra"]],
+          f"weather: the ACT lists only its own stations, and Canberra's forecast {stations}")
+    _, lines, asked = run("act", channel({"state": "ACT", "station": "94926"}))
+    check(len([t for t in lines if t[0] == "page"]) == 3 and "IDN10035.xml" in " ".join(asked), "weather: the ACT renders")
+    check(wx.choices("station", {"state": ""}) == [] and wx.choices("name", {"state": "SA"}) == [], "weather: no list without a state")
+
+    old = {"location": "Whyalla", "obs_product": "IDS60920", "obs_station": "95664", "forecast_product": "IDS10044",
+           "forecast_area": "SA_PT055"}
+    cfg = channel(old, {"latitude": -33.0328, "longitude": 137.5648})
+    check(config.app_options(cfg, "weather") == {"state": "SA", "station": "95664", "forecast_area": "SA_PT055", "name": "Whyalla"}
+          and cfg["general"]["latitude"] is None, "weather: options from before the state picker are migrated")
+
+    k = wx.badge("Whyalla"), wx.badge(""), wx.badge("Port Augusta West Beach")
+    check(all(b.size == (120, 96) for b in k) and k[0].tobytes() != k[1].tobytes(), "weather: the badge, same size, with the town")
+
+    with open(os.path.join(ROOT, "docs", "widgets.md")) as fh:
+        rows = re.findall(r"^\s*\| `([a-z]+)` \| [^|]+\| (\d+) \|", fh.read(), re.M)
+    check(dict((k, int(v)) for k, v in rows) == limits.LIMITS, f"limits.py matches docs/widgets.md's table {rows}")
 
 
 # ---------------------------------------------------------------- Settings -> Network and Chumby Info
@@ -393,6 +482,11 @@ def web(work, out):
         check(code == 200 and "my channels" in body, "web: the channels page renders")
         for a in config.registry():
             check(f'id="cz-{a["id"]}"' in body, f"web: customize dialog for {a['id']}")
+        check('list="dl-weather-station"' in body and 'data-suggest="station"' in body, "web: the weather's station is picked from a list")
+        code, body, _ = b.go("GET", "/api/choices?app=weather&key=station&opt.state=NSW")
+        check(code == 200 and '"94768"' in body and "Montague" in body, "web: the station list follows the state")
+        code, body, _ = b.go("GET", "/api/choices?app=weather&key=name&opt.state=NSW")
+        check(code == 404, "web: only listed fields have lists")
         code, body, _ = b.go("GET", "/icon/weather.png")
         check(code == 200 and body.startswith("�PNG"), "web: widget icons")
         code, _, _ = b.go("GET", "/preview/weather_current.raw.png")
@@ -456,6 +550,7 @@ def main():
     widgets_found()
     renders(work, out, a.screenshots)
     whyalla(work, out)
+    weather_places(work)
     chumby_info(work)
     service(work)
     web(work, out)

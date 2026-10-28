@@ -55,8 +55,8 @@ value against them before the widget sees it (`config.validate`). Every field ha
 
 | `type` | Value | Extra keys |
 | --- | --- | --- |
-| `string` | a string | `pattern` (a full-match regex), `max_len` |
-| `number` | a float, or an int with `integer: True` | `min`, `max`, `integer` |
+| `string` | a string | `pattern` (a full-match regex), `max_len`, `optional`, `suggest` |
+| `number` | a float, or an int with `integer: True` | `min`, `max`, `integer`, `optional` |
 | `bool` | `True` / `False` | |
 | `choice` | one of the values | `choices: [[value, label], ...]` |
 | `list` | a list of strings | `pattern`, `max_items`, `upper` (upper-case them) |
@@ -67,6 +67,20 @@ An `image_library` widget also provides `ingest_image(path) -> id`, `storage_dir
 (size, count, a real Pillow decode); the module turns an upload into its own stored
 image. [`config.py`](../files/python/neochumby_classic/config.py) has the details, and
 [`widgets/photos.py`](../files/python/neochumby_classic/widgets/photos.py) is the example.
+
+`optional: True` lets a string or number be left blank (`""`, or `None` for a number).
+
+`suggest: True` gives a string field a list to pick from (it can still be typed). The
+widget provides `choices(key, options, fetch=False) -> [[value, label], ...]`: the list
+for that field, given the options as they stand (the weather's stations follow its
+`state`). With `fetch=False` (the page as it is drawn) it must answer from what it has
+cached; the dialog's script then asks again with `fetch=True` when it opens and whenever a
+`choice` field in it changes, and the widget may fetch then (cache what it fetches, and
+keep it polite). Labels are drawn as text only. The Weather widget is the example.
+
+`migrate(options) -> options`, optional: turns options a previous version of the widget
+stored into today's, before they are validated (unknown keys are otherwise dropped, and
+missing ones get their defaults).
 
 ### `page_count` and the slideshow
 
@@ -110,6 +124,7 @@ It returns a `Rendered`:
 | `thumbs` | one 320×240 PIL image per slideshow page (Home's card shows the first) |
 | `home_title` | optional: Home's name for it, if not `APP["name"]` ("Whyalla Weather") |
 | `facts` | optional: short facts for Settings → Chumby Info (`{"feed": "weather of 28 Oct, 7:30 PM"}`) |
+| `latlon` | optional: the place it shows, `(latitude, longitude)`. The first widget in play order that gives one sets the sunrise and sunset that switch night mode, unless the owner set a latitude and longitude (the Weather widget gives its station's) |
 
 **Errors.** Catch what you can (a dead feed should draw the last good data, or a "can't
 reach" page). An exception from `render()` fails the whole render, and the Chumby keeps
@@ -195,17 +210,23 @@ memory. So:
   and the next one it prefetches. The aurora, the heaviest built-in page, needs about
   1.5 MB. The renderer logs a page over budget.
 - **The engine's limits** are shared by all widgets in a channel, so take only what you
-  need. A render over one is refused:
+  need. A render over one is refused, whole. They are one block of constants,
+  [`limits.py`](../files/python/neochumby_classic/limits.py), which the smoke test checks
+  against this table:
 
-  | Limit | Count |
-  | --- | --- |
-  | `MAXP`: slideshow pages | 48 |
-  | `MAXSCR`: screens (each `_night` copy counts) | 160 |
-  | `MAXPANE`: panes | 128 |
-  | `MAXHOT`: hot zones | 768 |
-  | sprites, actors | 64 each |
-  | `glow` layers / `glowseq` clips | 16 / 4 (1000 frames each) |
-  | stations | 16 |
+  | Directive | In the engine | Limit |
+  | --- | --- | --- |
+  | `page` | `MAXP`: slideshow pages | 48 |
+  | `screen` | `MAXSCR`: screens (each `_night` copy counts) | 160 |
+  | `pane` | `MAXPANE` | 128 |
+  | `hot` | `MAXHOT`: hot zones | 768 |
+  | `sprite` | `MAXS` | 64 |
+  | `actor` | `MAXA` | 64 |
+  | `glow` | `MAXGLOW`: light layers | 16 |
+  | `glowseq` | `MAXGSQ`: light clips (`MAXGSQ_FRAMES`: 1000 frames each) | 4 |
+  | `station` | `MAXST`: music stations | 16 |
+  | `sun` | `MAXSUN`: sunrise/sunset days | 16 |
+  | (files) | `MAXASSET`: different files the manifest names | 640 |
 
   With every built-in widget on, a channel uses 16 pages, 107 screens, 19 panes and 481 hot zones.
 - **Untrusted content stays pixels.** Text and pictures from the internet are only ever
