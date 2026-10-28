@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: pip install ".[dev]"
+      - name: Ruff
+        run: ruff check .
+      - name: Smoke test (offline render, second render writes nothing, web page)
+        run: python tests/smoke.py --screenshots screenshots
+      - name: Smoke test from the source tree, uninstalled
+        run: |
+          python -m venv /tmp/bare && /tmp/bare/bin/pip install Pillow segno
+          /tmp/bare/bin/python tests/smoke.py
+      - uses: actions/upload-artifact@v4
+        if: matrix.python == '3.13'
+        with:
+          name: screenshots
+          path: screenshots/
+
+  install-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: shellcheck -s sh install.sh
+      - name: Install, with a group standing in for neochumbyd
+        run: |
+          sudo groupadd --system neochumbyd
+          echo 0123456789abcdef0123456789abcdef | sudo ./install.sh
+          systemctl is-active neochumby-classic-renderer neochumby-classic-web
+          sudo stat -c '%a %U %G %n' /var/lib/neochumby-classic /var/lib/neochumby-classic/out /var/lib/neochumby-classic/refresh /etc/neochumby-classic/owner-token
+          test "$(sudo stat -c %a /etc/neochumby-classic/owner-token)" = 600
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS -o /dev/null http://localhost:8080/ && break; sleep 1; done
+          curl -fsS -H 'Host: localhost:8080' http://localhost:8080/ | grep -q 'my channels'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example.com' http://localhost:8080/)" = 421
+      - name: Re-run (idempotent, keeps settings)
+        run: |
+          sudo ./install.sh --no-start < /dev/null
+          grep -q '^NEOCHUMBY_CLASSIC_WEB=0.0.0.0:8080$' /etc/neochumby-classic/env
+          systemctl is-active neochumby-classic-renderer neochumby-classic-web
+      - name: Uninstall
+        run: |
+          sudo ./install.sh --uninstall --purge
+          if systemctl cat neochumby-classic-web.service >/dev/null 2>&1; then exit 1; fi
+          if id neochumby-classic >/dev/null 2>&1; then exit 1; fi
+          test ! -e /opt/neochumby-classic
+          test ! -e /var/lib/neochumby-classic
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t neochumby-classic .
+      - run: docker run --rm neochumby-classic neochumby-classic-admin starts
+      - run: NEOCHUMBYD_UID=1000 NEOCHUMBYD_GID=1000 docker compose config --quiet
