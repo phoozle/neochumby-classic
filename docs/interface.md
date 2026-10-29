@@ -14,7 +14,7 @@ $NEOCHUMBY_CLASSIC_OUT/              default /var/lib/neochumby-classic/out
     version                          the "done" marker: written last (below)
     manifest.txt                     what the engine draws, one directive per line
     hashes.txt                       md5sum format: every file the manifest names
-    *.raw *.l8 *.path                the files the manifest names
+    *.raw *.l8 *.path *.idx *.clip   the files the manifest names
     apps.json                        for the web page's previews only: not delivered
     .<name>.<pid>.tmp                a write in progress: never read, never deliver
 ```
@@ -109,6 +109,7 @@ render takes seconds), so step 4 rarely has to retry.
 | `.raw` | RGB565, little-endian, row-major, `W × H × 2` bytes, the size the directive gives. `0xF81F` is transparent in sprites, logos and knobs. Sprite sheets stack their frames vertically. |
 | `.l8` | One light frame for `glowseq`: a u32 span count, then per span a u32 `start | len << 17` (`start = y*320 + x`, `len ≤ 320`, one row) and `len` intensity bytes. |
 | `.path` | An `actor`'s path: int16 x, y per frame, at 25 fps. |
+| `.idx`, `.clip` | A `clip`'s index and records (clip format v1, [neochumby-scummvm's docs/clip-format.md](https://github.com/phoozle/neochumby-scummvm/blob/main/docs/clip-format.md)). A few MB each: stream them, don't cache them whole. |
 | `manifest.txt` | UTF-8 text, one directive per line; `#` lines are comments. The directives are in [widgets.md](widgets.md#what-a-widget-may-write). |
 | `hashes.txt` | `md5sum` format, sorted by name. The engine also uses it to key its cache by content. |
 

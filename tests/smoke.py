@@ -19,6 +19,9 @@ published), so the run is the same everywhere. It checks that:
     or chosen; the sun times from the station; old options migrated; renders that change
     nothing write nothing;
   - limits.py and docs/widgets.md's table of the engine's limits agree;
+  - Pajama Sam (synthetic clips only, from a stand-in converter: no game data anywhere):
+    the "add your files" page, the folder checks, Convert on the web page with its
+    progress and exit codes, the clip page, and that a second render writes nothing;
   - Home -> APPS: a page of tiles per six apps in a made-up neochumbyd tree, each opening
     its app ("app NAME"), paged, without classic, home or apps that can't be opened;
   - the engine's limits and the per-page memory budget hold;
@@ -33,6 +36,7 @@ published), so the run is the same everywhere. It checks that:
 import argparse
 import datetime as dt
 import http.client
+import json
 import os
 import re
 import socketserver
@@ -100,7 +104,8 @@ def widgets_found():
         declared = tomllib.load(fh)["project"]["entry-points"][widget.GROUP]
     check(declared == widget.BUILTIN, "widget.BUILTIN matches pyproject.toml's entry points")
     ids = [a["id"] for a in config.registry()]
-    check(ids == ["weather", "news", "whyallanews", "stocks", "photos", "aurora"], f"the six built-in widgets are found: {ids}")
+    check(ids == ["weather", "news", "whyallanews", "stocks", "photos", "aurora", "pajamasam"],
+          f"the seven built-in widgets are found: {ids}")
     for a in config.registry():
         check(a["icon_path"] is not None, f"{a['id']} has an icon")
 
@@ -133,7 +138,7 @@ def renders(work, out, shots):
     pages = [t for t in lines if t[0] == "page"]
     check(len(pages) == sum(s["pages"] for s in kept), f"{len(pages)} slideshow pages, as planned")
     for app, prefix in (("weather", "weather_"), ("news", "news_slide_"), ("whyallanews", "wn_slide"), ("stocks", "stocks_"),
-                        ("photos", "photo"), ("aurora", "aurora_")):
+                        ("photos", "photo"), ("aurora", "aurora_"), ("pajamasam", "pjs_setup")):
         check(any(t[2].startswith(prefix) for t in pages), f"{app} has a page")
     screens = {t[1] for t in lines if t[0] == "screen"}
     for want in ("home", "home_night", "settings", "timing", "network", "about", "configure", "music", "confirm",
@@ -447,6 +452,95 @@ def apps_screen(work):
     os.environ.pop("NEOCHUMBY_TREE")
 
 
+# ---------------------------------------------------------------- Pajama Sam (synthetic clips only)
+def pajamasam_web(work, b):
+    """Convert on the web page, with the stand-in converter (tests/fake-pajamasam)."""
+    from neochumby_classic import config
+    from neochumby_classic.widgets import pajamasam as pjs
+    os.environ["NEOCHUMBY_PAJAMASAM"] = os.path.join(HERE, "fake-pajamasam")
+    games = os.path.join(work, "games")
+    for d, marker in (("ps1", "Pajama.HE0"), ("empty", None)):     # empty marker files: no game data
+        os.makedirs(os.path.join(games, d), exist_ok=True)
+        if marker:
+            open(os.path.join(games, d, marker), "w").close()
+    for bad in ("games/ps1", "/etc", f"{games}/../games/ps1", os.path.join(games, "nope")):
+        try:
+            pjs.job_command({"ps1": bad})
+            check(False, f"pajamasam: the folder {bad!r} is refused")
+        except ValueError:
+            check(True, f"pajamasam: the folder {bad!r} is refused")
+    _, errs = config.validate(pjs.CONFIG_SCHEMA, {"ps1": "../x", "ps2": "/srv/games/$(id)"})
+    check(set(errs) == {"ps1", "ps2"}, "pajamasam: a relative or odd folder isn't saved")
+
+    def convert(folder):
+        code, _, _ = b.go("POST", "/action", {"action": "save_app", "app": "pajamasam", "seconds": "30",
+                                               "opt.ps1": folder, "opt.scenes": "2", "bool.setup_page": "1",
+                                               "opt.setup_page": "1"})
+        check(code == 303, f"pajamasam: the folder is saved ({code})")
+        code, _, r = b.go("POST", "/action", {"action": "job", "app": "pajamasam"})
+        check(code == 303 and "customize=pajamasam" in (r.getheader("Location") or ""), "web: Convert starts the job")
+        for _ in range(100):
+            _, body, _ = b.go("GET", "/api/job?app=pajamasam")
+            st = json.loads(body)
+            if not st["running"]:
+                return st
+            time.sleep(0.1)
+        return st
+
+    st = convert(os.path.join(games, "empty"))
+    check(st["code"] == 2 and "No Pajama Sam game was recognised" in st["summary"] and any("missing" in ln for ln in st["lines"]),
+          f"web: exit 2 is explained, with the progress lines {st['summary']!r}")
+    st = convert(os.path.join(games, "ps1"))
+    check(st["code"] == 0 and st["summary"] == pjs.EXIT[0] and st["lines"][-1].startswith("done clips=2"),
+          f"web: Convert's progress and result {st['lines'][-1:]}")
+    check(os.path.isfile(os.path.join(pjs.clip_dir(), "clips.txt")) and pjs.clip_dir().startswith(work),
+          "pajamasam: the clips go only to the private clip directory")
+    _, body, _ = b.go("GET", "/?customize=pajamasam")
+    check('data-job="pajamasam"' in body and "Convert" in body, "web: the customize dialog has Convert and its progress")
+    os.environ.pop("NEOCHUMBY_PAJAMASAM")
+
+
+def pajamasam_render(work):
+    from neochumby_classic import config, render
+    from neochumby_classic.widgets import pajamasam as pjs
+
+    def channel(**opts):
+        cfg = config.default_config()
+        for e in config.channel(cfg)["apps"]:
+            e["enabled"] = e["app"] == "pajamasam"
+            if e["app"] == "pajamasam":
+                e["options"].update(opts)
+        return cfg
+
+    out = os.path.join(work, "pjs", "kitchen")
+    render.render(out, channel(), "kitchen", now=NOW)
+    lines = manifest(out)
+    clip = [t for t in lines if t[0] == "clip"]
+    names = [n for n, _, _ in pjs.clips()]
+    check(len(clip) == 1 and clip[0][1:3] == ["0", "."] and clip[0][-1] == "random"
+          and clip[0][3:-1] == ["pjs_" + n for n in names] and len(names) == 2,
+          f"pajamasam: a page that plays a random clip {clip}")
+    check(all(os.path.isfile(os.path.join(out, f"pjs_{n}{ext}")) for n in names for ext in (".idx", ".clip"))
+          and all(pjs.read_index(os.path.join(out, f"pjs_{n}.idx")) for n in names), "pajamasam: the clips are delivered with it")
+    with open(os.path.join(out, "hashes.txt")) as fh:
+        hashed = fh.read()
+    check(all(f"pjs_{n}.clip" in hashed for n in names), "pajamasam: hashes.txt lists them")
+    check(render.problems([" ".join(t) for t in lines], out) == [], "pajamasam: every line is one the engine takes")
+    before = snapshot(out)
+    time.sleep(0.05)
+    changed = render.render(out, channel(), "kitchen", now=NOW)
+    diff = sorted(f for f, v in snapshot(out).items() if before.get(f) != v)
+    check(not changed and not diff, f"pajamasam: a second render writes nothing {diff[:5]}")
+    os.rename(pjs.clip_dir(), pjs.clip_dir() + ".off")
+    out2 = os.path.join(work, "pjs", "lounge")
+    render.render(out2, channel(), "lounge", now=NOW)
+    pages = [t[2] for t in manifest(out2) if t[0] == "page"]
+    check(pages == ["pjs_setup.raw"], f"pajamasam: without clips, the page saying where to add them {pages}")
+    render.render(out2, channel(setup_page=False), "lounge", now=NOW)
+    check([t[2] for t in manifest(out2) if t[0] == "page"] == ["empty.raw"], "pajamasam: ...or no page at all")
+    os.rename(pjs.clip_dir() + ".off", pjs.clip_dir())
+
+
 # ---------------------------------------------------------------- the renderer service
 def service(work):
     from neochumby_classic import service as svc
@@ -631,6 +725,7 @@ def web(work, out):
             fh.write("f" * 32 + "\n")
         page._health["at"] = 0
         check("owner token changed" in page.neochumbyd_health(), "web: a stored token that no longer works is reported")
+        pajamasam_web(work, b)
     finally:
         srv.shutdown()
         nd.shutdown()
@@ -655,6 +750,7 @@ def main():
     chumby_info(work, out)
     service(work)
     web(work, out)
+    pajamasam_render(work)
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
     return 1 if FAILS else 0
 

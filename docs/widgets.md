@@ -1,11 +1,11 @@
 # The widget API, version 1
 
 A **widget** is one app in a Chumby's channel: Weather, ABC News, Whyalla News, Stock
-Quotes, Photos, the Aurora screensaver. Each is a Python module that draws its pages and screens as
+Quotes, Photos, the Aurora screensaver, the Pajama Sam screensaver. Each is a Python module that draws its pages and screens as
 pictures, ahead of time, on the server. The Chumby only copies those pictures to its
 screen. This page is everything a widget needs to know.
 
-The six built-in widgets live in [`files/python/neochumby_classic/widgets/`](../files/python/neochumby_classic/widgets/)
+The seven built-in widgets live in [`files/python/neochumby_classic/widgets/`](../files/python/neochumby_classic/widgets/)
 and are found exactly as an outside widget would be: through an entry point.
 
 ## Versioning
@@ -82,6 +82,14 @@ keep it polite). Labels are drawn as text only. The Weather widget is the exampl
 stored into today's, before they are validated (unknown keys are otherwise dropped, and
 missing ones get their defaults).
 
+**A background job**, optional: a widget with `JOB = {"label": ..., "help": ...}` and
+`job_command(options) -> argv` gets a button with that label in its customize dialog. The
+web page runs the argv (no shell; the options as saved) in the background, one run at a time
+per widget, in the widget's state directory, shows its last stdout lines while it runs, and
+`job_explain(exit_code) -> str` says what the result means. `job_command` validates
+everything it puts in the argv and raises `ValueError("why")` to refuse. A run that exits
+0 asks for a render. The Pajama Sam screensaver's Convert is the example.
+
 ### `page_count` and the slideshow
 
 The renderer plans the slideshow before anything is drawn: apps in channel order, each
@@ -149,6 +157,7 @@ manifest by their file name only.
 | `bgscroll N FILE W SPEED` | a seamless W×240 panorama that pans behind the page |
 | `glow N FILE W H Y SPEED [FADE_MS PHASE_MS SWAY_PX SWAY_MS [X0 [ON_MS]]]` | a strip of light, added (saturating) at row Y, panning; several make parallax |
 | `glowseq N PREFIX NFRAMES FPS R G B BRIGHT` | a looping clip of light frames `PREFIX_000.l8` ... (format in [interface.md](interface.md#the-files)) |
+| `clip N DIR NAME [NAME ...] [random]` | the page plays a looping clip (clip format v1, [neochumby-scummvm's docs/clip-format.md](https://github.com/phoozle/neochumby-scummvm/blob/main/docs/clip-format.md)): files `NAME.idx` and `NAME.clip` in `DIR`, which is `.` (beside the manifest: the widget writes them like any other file); with several names and `random`, a random one each time the page comes on. Provisional: the engine's directive is being added in neochumby #11, and this follows its plan |
 | `logofx N FILE W H X Y [FX [MODE [HOLD]]]` | a logo that builds itself with a demoscene intro (`random`, `fly`, `print`, `wobble`, `zoom`, `drop`, `dissolve`, `raster`, `decrunch`, `spin`, `octopus`) |
 
 **Screens** (interactive, outside the slideshow):
@@ -270,7 +279,7 @@ memory. So:
   sizes are within -32768..32767, and `manifest.txt` and `hashes.txt` at most 2 MB each.
   The engine skips a line past any of these; the renderer refuses the render instead.
 
-  With every built-in widget on, a channel uses 16 pages, 107 screens, 23 panes, 481 hot zones,
+  With every built-in widget on, a channel uses 17 pages, 109 screens, 23 panes, 485 hot zones,
   2 live fonts and 16 live boxes.
 - **Untrusted content stays pixels.** Text and pictures from the internet are only ever
   drawn. Names, directives and paths never come from fetched content.

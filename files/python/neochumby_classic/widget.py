@@ -116,6 +116,7 @@ DIST = "neochumby-classic"
 BUILTIN = {
     "aurora": "neochumby_classic.widgets.aurora",
     "news": "neochumby_classic.widgets.news",
+    "pajamasam": "neochumby_classic.widgets.pajamasam",
     "photos": "neochumby_classic.widgets.photos",
     "stocks": "neochumby_classic.widgets.stocks",
     "weather": "neochumby_classic.widgets.weather",

@@ -38,7 +38,7 @@ PAGE_BUDGET = 2 * 1024 * 1024  # bytes one page or screen may need in memory at 
 # Directives a widget may write (docs/widgets.md). The rest belong to this module.
 WIDGET_DIRECTIVES = {"page", "pagenight", "pagetap", "sprite", "actor", "screen", "pane", "hot", "slider",
                      "logofx", "scroller", "bgscroll", "glow", "glowseq", "clock", "clocknight", "ticker",
-                     "tickernight", "livefont", "live"}
+                     "tickernight", "livefont", "live", "clip"}
 LIVE_KEYS, CHARSET = widget.LIVE_KEYS, widget.LIVE_CHARSET
 ONCE = {"clock", "clocknight", "ticker", "tickernight"}     # global: the first widget's wins
 
@@ -134,7 +134,7 @@ def check_lines(app, r, first, out):
             continue
         if t[0] not in WIDGET_DIRECTIVES:
             raise WidgetError(f"{app}: directive {t[0]!r} isn't one a widget may write")
-        if t[0] in ("pagenight", "pagetap", "sprite", "actor", "logofx", "scroller", "bgscroll", "glow", "glowseq"):
+        if t[0] in ("pagenight", "pagetap", "sprite", "actor", "logofx", "scroller", "bgscroll", "glow", "glowseq", "clip"):
             if len(t) < 3 or not t[1].isdigit() or not first <= int(t[1]) < first + len(pages):
                 raise WidgetError(f"{app}: {t[0]} for a page that isn't its own: {ln}")
         m = re.fullmatch(r"page(?:night)?:(\d+)", t[1]) if t[0] in ("pane", "live") and len(t) > 1 else None
@@ -148,8 +148,8 @@ def check_lines(app, r, first, out):
         bad = [n for n in names if not SCREEN_OK.fullmatch(n)]
         if bad:
             raise WidgetError(f"{app}: screen name {bad[0]!r} isn't 1-{limits.SCREEN_NAME} letters, digits or '_'")
-        for tok in t:
-            if tok.endswith((".raw", ".l8", ".path")):
+        for tok in t + clip_files(t):
+            if tok.endswith((".raw", ".l8", ".path", ".idx", ".clip")):
                 if not FILE_OK.fullmatch(tok):
                     raise WidgetError(f"{app}: unsafe file name {tok!r}")
                 if not os.path.isfile(os.path.join(out, tok)):
@@ -230,6 +230,11 @@ def problems(lines, out=None):
                 elif out is not None and _size(out, t[2]) != cw * ch * len(CHARSET) * 2:
                     bad.append(f"livefont file {t[2]} isn't {cw}x{ch * len(CHARSET)}")
                 fonts.add(t[1])
+            elif k == "clip":
+                names = [n for n in t[3:] if n != "random"]
+                if not t[1].isdigit() or int(t[1]) >= pages or t[2] != "." or not names \
+                        or "random" in t[3:-1] or not all(FILE_OK.fullmatch(n + ".clip") for n in names):
+                    bad.append(f"clip {ln[:60]!r}")
             elif k == "live":
                 x, y, w, h = map(int, t[4:8])
                 if not target_ok(t[1]) or t[2] not in LIVE_KEYS or t[3] not in fonts or len(t) != 10 \
@@ -269,6 +274,13 @@ def memory_use(out, lines):
 
 
 # ---------------------------------------------------------------- the manifest
+def clip_files(t):
+    """The files a `clip N DIR NAME... [random]` line names: NAME.idx and NAME.clip, for DIR "."."""
+    if t[:1] != ["clip"] or len(t) < 4 or t[2] != ".":
+        return []
+    return [n + ext for n in t[3:] if n != "random" for ext in (".idx", ".clip")]
+
+
 def referenced_files(out, lines):
     """The files the manifest names (glowseq frames by prefix). Stale renders left in OUT
     are not named, so they are never delivered."""
@@ -277,8 +289,8 @@ def referenced_files(out, lines):
         toks = line.split()
         if len(toks) >= 4 and toks[0] == "glowseq" and toks[3].isdigit():
             toks = toks + [f"{toks[2]}_{k:03d}.l8" for k in range(int(toks[3]))]
-        for tok in toks:
-            if tok.endswith((".raw", ".path", ".l8")) and os.path.isfile(os.path.join(out, tok)):
+        for tok in toks + clip_files(toks):
+            if tok.endswith((".raw", ".path", ".l8", ".idx", ".clip")) and os.path.isfile(os.path.join(out, tok)):
                 if not FILE_OK.fullmatch(tok):
                     raise ValueError(f"unsafe file name in manifest: {tok!r}")
                 names.add(tok)
@@ -339,7 +351,7 @@ def prune(out, lines, older=PRUNE_AFTER):
     for name in os.listdir(out):
         p = os.path.join(out, name)
         stale = name.startswith(".") and name.endswith(".tmp")
-        stale = stale or (name.endswith((".raw", ".l8", ".path", ".png")) and name not in keep)
+        stale = stale or (name.endswith((".raw", ".l8", ".path", ".png", ".idx", ".clip")) and name not in keep)
         try:
             if stale and os.path.isfile(p) and os.path.getmtime(p) < cutoff:
                 os.unlink(p)

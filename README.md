@@ -2,8 +2,9 @@
 
 The classic Chumby experience for [neochumby](https://github.com/johnmerchant/neochumby):
 a 90s weather channel for anywhere in Australia, ABC News, stock quotes, your photos and a
-Vista-style aurora screensaver (and, if you add it, the Whyalla News), with Home, Settings and Music screens, and a "my channels" web page modelled
-on chumby.com's.
+Vista-style aurora screensaver (and, if you add them, the Whyalla News and a Pajama Sam
+screensaver from your own copies of the games), with Home, Settings and Music screens, and
+a "my channels" web page modelled on chumby.com's.
 
 The Chumby (a 266 MHz ARM with no FPU) only copies pictures to its screen. Everything hard
 (fetching, parsing, fonts, layout) happens here, on the server beside neochumbyd: this
@@ -172,6 +173,41 @@ You can also use pictures of your own: put them in `/etc/neochumby-classic/asset
 - Keep pictures like these out of any fork of this repository you publish
   (`private-assets/` is in `.gitignore` for that).
 
+## Bring your own Pajama Sam
+
+The **Pajama Sam Screensaver** plays looping scenes from *Pajama Sam: No Need to Hide When
+It's Dark Outside* and *Pajama Sam 2: Thunder and Lightning Aren't So Frightening*, made
+from **your own copies of the games**, on your own server. Nothing of the games is in this
+repository or its tests, and nothing is downloaded: the games are Humongous
+Entertainment's, and you need your own copies.
+
+1. Build the converter, `neochumby-pajamasam`, from
+   [phoozle/neochumby-scummvm](https://github.com/phoozle/neochumby-scummvm) (Rust and a C++
+   compiler: `cargo build --release --bin neochumby-pajamasam`), and put it on the PATH, or
+   name it in `/etc/neochumby-classic/env`: `NEOCHUMBY_PAJAMASAM=/usr/local/bin/neochumby-pajamasam`.
+2. Copy each game's files to a folder on the server that the `neochumby-classic` user can
+   read, outside `/home` (the services can't see `/home`), e.g. `/srv/games/pajama1`
+   (`Pajama.HE0` and the rest) and `/srv/games/pajama2` (`PAJAMA2.HE0` and the rest).
+3. On the web page, **add apps → Pajama Sam Screensaver**, then **customize**: enter the
+   folders, save, and press **Convert**. It plays each game headless and records the
+   scenes, about a minute each; the dialog shows its progress and what the result means:
+
+   | Exit | Meaning |
+   | --- | --- |
+   | 0 | Done: the clips are made (some scenes may have failed: see the progress lines) |
+   | 1 | The converter didn't understand its arguments (a bug, or another version) |
+   | 2 | No game recognised in the folders given |
+   | 3 | The games were recognised, but no scene could be recorded |
+   | 4 | The converter couldn't write its output directory |
+
+The clips go only to this server's private state
+(`/var/lib/neochumby-classic/widgets/pajamasam/clips`), and from there to your Chumbys,
+which play a random one each time the screensaver comes on. Until there are clips, the
+screensaver shows a page saying where to add the files (or nothing, if you switch that off).
+Clips you converted elsewhere can go in an asset directory's `pajamasam/` instead (with
+their `clips.txt`). With Docker, mount the game folders into the web container read-only.
+Never publish the clips: they are copies of the games' art.
+
 ## Data sources: terms to check
 
 The widgets fetch from these sources. Check each one's terms before you use this beyond
@@ -192,7 +228,7 @@ widget: it is off until you add it from "add apps" on the web page.
 
 ## Widgets
 
-The six widgets are plugins, found through Python entry points, exactly as a widget from
+The seven widgets are plugins, found through Python entry points, exactly as a widget from
 another repository would be. [docs/widgets.md](docs/widgets.md) is the widget API
 (version 1): what a widget declares, what it may draw, the rules that keep the Chumby fast
 (stable names, write only what changed, no per-render times, a memory budget per page,

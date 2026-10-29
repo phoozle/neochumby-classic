@@ -37,6 +37,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -114,7 +115,7 @@ footer a{font-weight:700;margin-left:14px;font-size:11px}
 .dlg .x{position:absolute;right:10px;top:6px;color:#999;font-size:18px;line-height:1}
 .dlg h3{color:#f0601e;font-size:17px;margin:2px 22px 10px 0;font-weight:700}
 .dlg .f{margin:8px 0}.dlg .f>span{display:block;color:#777;font-size:12px}
-.dlg .help{color:#999;font-size:11px}.dlg .e{color:#d40000;font-size:11px;font-weight:700}
+.dlg .help{color:#999;font-size:11px}.dlg .jobst{font-size:12px;margin-top:6px}.dlg .joblog{font-size:10px;max-height:9em;overflow:auto;background:#f4f4f4;padding:4px;white-space:pre-wrap}.dlg .e{color:#d40000;font-size:11px;font-weight:700}
 .subs{list-style:none;padding:0;margin:3px 0}
 .subs li{display:flex;align-items:center;gap:6px;padding:3px 4px;border:1px solid #e5e2d6;background:#f8f7f2;margin-bottom:3px;border-radius:3px}
 .subs li label{flex:1}
@@ -160,6 +161,13 @@ function suggest(box){box.querySelectorAll('[data-suggest]').forEach(function(in
 document.addEventListener('change',function(e){if(e.target.matches('select[name^="opt."]')&&e.target.form.querySelector('[data-suggest]')){
   e.target.form.querySelectorAll('[data-suggest]').forEach(function(i){i.value=''});suggest(e.target.form)}});
 document.querySelectorAll('.modal.open').forEach(suggest);
+// a widget's background job (Pajama Sam's Convert): follow its progress while it runs
+function follow(box){if(box.dataset.running!=='1')return;
+  setTimeout(function(){fetch('/api/job?app='+encodeURIComponent(box.dataset.job)).then(function(r){return r.json()}).then(function(j){
+    box.querySelector('.jobst').textContent=j.summary;box.querySelector('.joblog').textContent=(j.lines||[]).join('\n');
+    box.dataset.running=j.running?'1':'0';if(!j.running){var b=box.closest('form').querySelector('button');if(b)b.disabled=false}
+    follow(box)}).catch(function(){})},2000)}
+document.querySelectorAll('[data-job]').forEach(follow);
 function closeDlg(){document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));history.replaceState(null,'','/')}
 document.addEventListener('click',function(e){
   var t=e.target.closest('[data-open]');if(t){e.preventDefault();openDlg(t.dataset.open);return}
@@ -342,9 +350,23 @@ def dialog(a, e, is_open, errors=None, form=None):
     for fld in a["schema"]:
         if fld["type"] == "image_library":
             out.append(upload_form(aid, fld))
+    if getattr(a["module"], "JOB", None) and callable(getattr(a["module"], "job_command", None)):
+        out.append(job_html(a))
     out.append(previews(aid))
     out.append("</div></div>")
     return "".join(out)
+
+
+def job_html(a):
+    """A widget's background job (its JOB): the button, and what the last run said."""
+    job, st = a["module"].JOB, job_status(a)
+    lines = "\n".join(st["lines"][-12:])
+    return (f'<form method="post" action="/action" class="up"><input type="hidden" name="action" value="job">'
+            f'<input type="hidden" name="app" value="{h(a["id"])}"><span>{h(job.get("label", "Run"))}</span>'
+            f'<button class="btn"{" disabled" if st["running"] else ""}>{h(job.get("label", "Run"))}</button>'
+            f'<div class="help">{h(job.get("help", ""))}</div>'
+            f'<div class="job" data-job="{h(a["id"])}" data-running="{1 if st["running"] else 0}">'
+            f'<div class="jobst">{h(st["summary"])}</div><pre class="joblog">{h(lines)}</pre></div></form>')
 
 
 def general_dialog(cfg, is_open, errors=None, form=None):
@@ -717,8 +739,65 @@ DONE = {   # ?done=KEY after a successful POST: fixed messages, never text from 
     "save_app": "Saved {app}.", "save_general": "Saved. The QR code on the chumby changes at its next refresh.",
     "refresh": "Asked the renderer to refresh the chumbys now.",
     "upload": "Pictures added to {app}.",
+    "job": "Started {app}'s job: its progress shows below.",
 }
 SAVE_LOCK = threading.Lock()
+JOBS = {}                                       # widget id -> its background job (start_job)
+JOBS_LOCK = threading.Lock()
+JOB_LINES = 300
+
+
+def start_job(a, options):
+    """Start widget a's job (its job_command(options) argv, no shell) in the background, one
+    at a time per widget. Its stdout lines are kept for the page; stderr goes to a log file
+    in the state directory. Returns an error message, or None."""
+    with JOBS_LOCK:
+        j = JOBS.get(a["id"])
+        if j and j["proc"].poll() is None:
+            return "It's already running."
+        try:
+            argv = a["module"].job_command(options)
+        except ValueError as e:
+            return str(e)
+        if not argv or not all(isinstance(x, str) and "\0" not in x for x in argv):
+            return "The widget gave no command."
+        logdir = os.path.join(config.state_dir(), "widgets", a["id"])
+        os.makedirs(logdir, exist_ok=True)
+        try:
+            with open(os.path.join(logdir, "job.log"), "wb") as err:
+                proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err, cwd=logdir,
+                                        start_new_session=True)
+        except OSError as e:
+            return f"Couldn't start it: {e.strerror or e}"
+        j = JOBS[a["id"]] = {"proc": proc, "lines": [], "code": None, "started": time.time()}
+
+    def follow():
+        for raw in proc.stdout:
+            line = "".join(ch for ch in raw.decode("utf-8", "replace").rstrip("\n") if ch.isprintable())[:300]
+            with JOBS_LOCK:
+                j["lines"] = (j["lines"] + [line])[-JOB_LINES:]
+        code = proc.wait()
+        with JOBS_LOCK:
+            j["code"] = code
+        if code == 0:
+            request_refresh()                       # the new output shows at once
+    threading.Thread(target=follow, daemon=True).start()
+    return None
+
+
+def job_status(a):
+    """{running, code, lines, summary} of widget a's last job (since this page started)."""
+    with JOBS_LOCK:
+        j = JOBS.get(a["id"])
+        if not j:
+            return {"running": False, "code": None, "lines": [], "summary": "Not run yet."}
+        running, code, lines = j["code"] is None, j["code"], list(j["lines"])
+    if running:
+        summary = f"Running since {time.strftime('%H:%M', time.localtime(j['started']))}..."
+    else:
+        explain = getattr(a["module"], "job_explain", None)
+        summary = explain(code) if explain else f"Finished (exit {code})."
+    return {"running": running, "code": code, "lines": lines, "summary": summary}
 CHOICES_LOCK = threading.Lock()                # one list fetch at a time
 
 
@@ -742,7 +821,7 @@ def done_flash(q):
         return None
     a = config.app_info((q.get("app") or [""])[0])
     msg = DONE[key].format(app=a["name"] if a else "the app")
-    if key not in ("refresh",):
+    if key not in ("refresh", "job"):
         msg += " The chumby updates at its next refresh."
     return ("ok", msg)
 
@@ -814,6 +893,14 @@ def act(pairs):
         if errs:
             return cfg, "general", errs, raw, ("err", "Please fix the highlighted fields.")
         cfg["general"] = gen
+    elif action == "job":
+        a = reg.get(aid)
+        if not entry or not a or not getattr(a["module"], "JOB", None):
+            return cfg, None, None, None, ("err", "Unknown app.")
+        why = start_job(a, entry["options"])
+        if why:
+            return cfg, aid, None, None, ("err", why)
+        return cfg, None, None, None, None
     elif action == "refresh":
         if not request_refresh():
             return cfg, None, None, None, ("err", "Couldn't ask the renderer to refresh (see its log).")
@@ -1139,6 +1226,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(404, json.dumps({"choices": []}), "application/json")
             opts, _ = config.validate(a["schema"], {k[4:]: v[0] for k, v in q.items() if k.startswith("opt.")})
             return self.send(200, json.dumps({"choices": suggestions(a, fld, opts, fetch=True)}), "application/json")
+        if p == "/api/job":                                   # a widget's background job (the dialog's script)
+            a = config.app_info((q.get("app") or [""])[0])
+            if not a or not getattr(a["module"], "JOB", None):
+                return self.send(404, json.dumps({}), "application/json")
+            st = job_status(a)
+            return self.send(200, json.dumps(dict(st, lines=st["lines"][-12:])), "application/json")
         if p == "/api/status":
             cfg = config.load(ARGS.config)
             kept, dropped = config.plan(cfg)
@@ -1181,6 +1274,8 @@ class Handler(BaseHTTPRequestHandler):
         q = {"done": f.get("action", "")}
         if f.get("app"):
             q["app"] = f["app"]
+        if f.get("action") == "job":
+            q["customize"] = f.get("app", "")
         self.send(303, "", "text/plain", {"Location": "/?" + urllib.parse.urlencode(q)})
 
     def admin_post(self, path, f):

@@ -90,9 +90,9 @@ MAXP = limits.MAXP             # the engine's slideshow page limit (limits.py)
 
 # in the registry but switched off in a fresh config: an empty photo library has nothing
 # to show, and its pages would crowd the slideshow; Whyalla News is one town's paper (an
-# optional widget: owners add it from "add apps").
-DEFAULT_OFF = {"photos", "whyallanews"}
-ORDER = ["weather", "news", "whyallanews", "stocks", "photos", "aurora"]   # default play order of whatever exists
+# optional widget: owners add it from "add apps"); Pajama Sam needs the owner's own game files.
+DEFAULT_OFF = {"photos", "whyallanews", "pajamasam"}
+ORDER = ["weather", "news", "whyallanews", "stocks", "photos", "aurora", "pajamasam"]   # default play order of whatever exists
 IMAGE_ID = r"[A-Za-z0-9_-]{1,64}"
 CHUMBY_NAME = r"[a-z0-9_-]{1,32}"                           # neochumbyd's names for Chumbys
 CHANNEL_ID = r"[a-z0-9_-]{1,24}"

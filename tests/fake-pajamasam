@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""A stand-in for neochumby-pajamasam (phoozle/neochumby-scummvm) with the same CLI, progress
+events and exit codes, that writes synthetic clips (fakeclips.py). A game folder counts as
+"recognised" if it holds an empty marker file named like the game's index file: the tests
+make those; there is no game data anywhere."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fakeclips  # noqa: E402
+
+a = sys.argv[1:]
+if a[:1] != ["convert"] or "--out" not in a:
+    print("usage: neochumby-pajamasam convert --out DIR [--ps1 DIR] [--ps2 DIR]", file=sys.stderr)
+    sys.exit(1)
+opt = {a[i]: a[i + 1] for i in range(1, len(a) - 1, 2)}
+out, found = opt["--out"], []
+for game, marker in (("ps1", "pajama.he0"), ("ps2", "pajama2.he0")):
+    d = opt.get("--" + game)
+    if not d:
+        continue
+    names = {n.lower() for n in os.listdir(d)} if os.path.isdir(d) else set()
+    if marker in names:
+        print(f"game {game} found path={d}", flush=True)
+        found.append(game)
+    else:
+        print(f'game {game} missing reason="no {marker.upper()}"', flush=True)
+if not found:
+    sys.exit(2)
+try:
+    os.makedirs(out, exist_ok=True)
+except OSError:
+    sys.exit(4)
+clips = []
+for game in found:
+    for k in range(int(opt.get("--auto", "2"))):
+        name = f"{game}-room{10 + k}"
+        print(f'scene {name} recording title="Room {10 + k}"', flush=True)
+        clips.append((name, game, f"Room {10 + k}"))
+        print(f"scene {name} done frames={4 + k} fps=12 loop=0", flush=True)
+fakeclips.listing(out, clips)
+print(f"done clips={len(clips)} failed=0", flush=True)
