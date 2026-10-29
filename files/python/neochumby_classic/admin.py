@@ -12,13 +12,14 @@ is one line of space-separated words; the answer is data lines, then "ok", "ok W
     paired               -> paired NAME KEYHEX [k=v ...]  (per Chumby) ... ok
     pending              -> pending CODE NAME ADDRESS KEYHEX (per request) ... ok
     approve CODE TOKEN   -> ok NAME | error ...
-    refuse CODE          -> ok | error ...
+    refuse CODE TOKEN    -> ok | error ...
     forget NAME TOKEN    -> ok | error ...
-    set NAME KEY=VALUE   -> ok | error ...      (KEY= with no value removes it)
+    set NAME KEY=VALUE TOKEN -> ok | error ...  (KEY= with no value removes it)
     check TOKEN          -> ok | error wrong token
 
 TOKEN is the server owner's token (`neochumbyd token` prints it). neochumbyd requires it
-on approve and forget, so a fault in this program can't pair or unpair a Chumby by itself.
+on every change (approve, refuse, forget, set), so a fault in this program can't change
+a Chumby by itself: the page passes the token the owner typed at sign-in.
 
 Start apps are the apps in neochumbyd's tree whose manifest says start=true (proposal
 0002): only those are offered.
@@ -204,10 +205,12 @@ def approve(code, token):
     return client().ask("approve", code, token)[1]
 
 
-def refuse(code):
+def refuse(code, token):
     if not CODE.fullmatch(code or ""):
         raise AdminError("a pairing code is six digits")
-    client().ask("refuse", code)
+    if not OWNER_TOKEN.fullmatch(token or ""):
+        raise AdminError("sign in again")
+    client().ask("refuse", code, token)
 
 
 def forget(name, token):
@@ -218,23 +221,20 @@ def forget(name, token):
     client().ask("forget", name, token)
 
 
-def set_setting(name, key, value, token=None):
-    """set NAME KEY=VALUE, with the signed-in owner's token after it when neochumbyd wants one."""
+def set_setting(name, key, value, token):
+    """set NAME KEY=VALUE TOKEN: every change over the socket needs the signed-in owner's token."""
     if not NAME.fullmatch(name or "") or not re.fullmatch(r"[a-z_]{1,32}", key) or not VALUE.fullmatch(value or ""):
         raise AdminError("not a valid setting")
-    if token is None:
-        client().ask("set", name, f"{key}={value}")
-        return
     if not OWNER_TOKEN.fullmatch(token or ""):
         raise AdminError("sign in again")
     client().ask("set", name, f"{key}={value}", token)
 
 
-def set_start(name, app):
+def set_start(name, app, token):
     """A Chumby's start app; "" goes back to neochumbyd's default."""
     if app and app not in [a for a, _ in start_apps()]:
         raise AdminError("not a start app in this server's tree")
-    set_setting(name, START_SETTING, app)
+    set_setting(name, START_SETTING, app, token)
 
 
 def music_apps():
@@ -269,10 +269,10 @@ def set_music(name, app, token):
     set_setting(name, MUSIC_SETTING, app, token)
 
 
-def set_delivery(name, how):
+def set_delivery(name, how, token):
     if how and how not in DELIVERY:
         raise AdminError("delivery is nfs or sync")
-    set_setting(name, "delivery", how)
+    set_setting(name, "delivery", how, token)
 
 
 def main(argv=None):

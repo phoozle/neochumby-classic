@@ -618,16 +618,16 @@ class Neochumbyd(socketserver.ThreadingUnixStreamServer):
             return ["ok lounge" if w[2] == OWNER else "error wrong token"]
         if w[:1] == ["forget"] and len(w) == 3:
             return ["ok" if w[2] == OWNER else "error wrong token"]
-        if w[:1] == ["set"] and len(w) in (3, 4) and "=" in w[2]:
+        if w[:1] == ["set"] and len(w) == 4 and "=" in w[2]:          # every change needs the owner's token
             k, v = w[2].split("=", 1)
-            if k == "music" and (len(w) != 4 or w[3] != OWNER):         # music= needs the owner's token
+            if w[3] != OWNER:
                 return ["error wrong token"]
             if w[1] not in self.paired:
                 return ["error no Chumby paired under that name"]
             self.paired[w[1]][k] = v
             return ["ok"]
-        if w[:1] == ["refuse"] and len(w) == 2:
-            return ["ok"]
+        if w[:1] == ["refuse"] and len(w) == 3:
+            return ["ok" if w[2] == OWNER else "error wrong token"]
         return ["error unknown command"]
 
 
@@ -733,8 +733,9 @@ def web(work, out):
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "set", "name": "kitchen", "start": "doom", "delivery": "nfs"})
         check(code == 400 and not any(w[:1] == ["set"] for w in nd.seen[n:]), "web: a start app that isn't one is refused")
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "set", "name": "kitchen", "start": "home", "delivery": "nfs"})
-        check(code == 303 and ["set", "kitchen", f"{admin.START_SETTING}=home"] in nd.seen and ["set", "kitchen", "delivery=nfs"] in nd.seen,
-              "web: start app and delivery are set")
+        check(code == 303 and ["set", "kitchen", f"{admin.START_SETTING}=home", OWNER] in nd.seen
+              and ["set", "kitchen", "delivery=nfs", OWNER] in nd.seen,
+              "web: start app and delivery are set, with the signed-in owner's token")
         _, body, _ = b.go("GET", "/chumbys")
         check('<select name="music">' in body and ">Default (SomaFM)<" in body and 'value="airplay"' in body
               and 'value="doom">' not in body.split('<select name="music">')[1].split("</select>")[0],
@@ -749,6 +750,8 @@ def web(work, out):
         check(code == 400 and not any(w[:1] == ["set"] for w in nd.seen[n:]), "web: a music app that isn't one is refused, and nothing is set")
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "approve", "code": "123456"})
         check(code == 303 and ["approve", "123456", OWNER] in nd.seen, "web: approve passes the signed-in owner's token")
+        code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "refuse", "code": "123456"})
+        check(code == 303 and ["refuse", "123456", OWNER] in nd.seen, "web: refuse passes it too")
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "forget", "name": "kitchen"})
         check(code == 303 and ["forget", "kitchen", OWNER] in nd.seen, "web: forget passes it too")
         code, body, _ = b.go("GET", "/chumbys?done=" + urllib.parse.quote("<script>"))

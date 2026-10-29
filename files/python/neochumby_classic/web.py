@@ -1059,7 +1059,7 @@ def admin_act(f, sess):
         if action == "approve":
             admin.approve(f.get("code", ""), sess[2])
         elif action == "refuse":
-            admin.refuse(f.get("code", ""))
+            admin.refuse(f.get("code", ""), sess[2])
         elif action == "forget":
             admin.forget(f.get("name", ""), sess[2])
         elif action == "set":
@@ -1067,10 +1067,10 @@ def admin_act(f, sess):
                 raise admin.AdminError("not a start app in this server's tree")
             if f.get("music") and f["music"] not in [a for a, _ in admin.music_apps()]:
                 raise admin.AdminError("not a music app in this server's tree")
-            admin.set_start(f.get("name", ""), f.get("start", ""))
+            admin.set_start(f.get("name", ""), f.get("start", ""), sess[2])
             if "music" in f:
                 admin.set_music(f.get("name", ""), f["music"], sess[2])
-            admin.set_delivery(f.get("name", ""), f.get("delivery", ""))
+            admin.set_delivery(f.get("name", ""), f.get("delivery", ""), sess[2])
         else:
             return None, "Unknown action."
     except admin.AdminError as e:
