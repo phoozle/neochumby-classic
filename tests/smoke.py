@@ -141,7 +141,12 @@ def renders(work, out, shots):
                         ("photos", "photo"), ("aurora", "aurora_"), ("pajamasam", "pjs_setup")):
         check(any(t[2].startswith(prefix) for t in pages), f"{app} has a page")
     screens = {t[1] for t in lines if t[0] == "screen"}
-    for want in ("home", "home_night", "settings", "timing", "network", "about", "configure", "music", "confirm",
+    check("music" not in {t[1] for t in lines if t[0] == "screen"} and not any(t[0] == "station" for t in lines),
+          "no Music screen or stations: music is an app of its own")
+    hot = {(t[1], " ".join(t[6:])) for t in lines if t[0] == "hot"}
+    check(("home", "music apps_p0") in hot and ("home", "music_toggle") in hot,
+          "Home: MUSIC opens the music app (else APPS), MUTE toggles it")
+    for want in ("home", "home_night", "settings", "timing", "network", "about", "configure", "confirm",
                  "stocks_list", "news_nat_l0", "wn_l0", "wn_l0_night", "wn_s0_p0", "wn_s0_p0_night"):
         check(want in screens, f"screen {want}")
     targets = {t[-1] for t in lines if t[0] == "hot" and t[-2] == "screen"} | {t[2] for t in lines if t[0] == "pagetap"}
@@ -409,6 +414,8 @@ def apps_screen(work):
             with open(os.path.join(d, "manifest"), "w") as fh:
                 fh.write(f"title=GAME {k}\nexec=neochumby-game{k}\n" + ("colour=dc281e\n" if k % 2 else ""))
         for name, man in (("classic", "title=Classic\nexec=neochumby-classic\nstart=true\n"),
+                          ("somafm", "title=SomaFM\nexec=neochumby-somafm\nmusic=true\n"),
+                          ("radio", "title=Radio\nexec=neochumby-radio\nmusic=true\n"),
                           ("home", "title=Apps\nexec=neochumby-home\nstart=true\n"),
                           ("airplay", "title=AirPlay\nservice=neochumby-airplay\n"),        # no exec: can't be opened
                           ("Bad Name", "title=Bad\nexec=x\n")):
@@ -421,9 +428,12 @@ def apps_screen(work):
     cfg = config.default_config()
     for e in config.channel(cfg)["apps"]:
         e["enabled"] = False
-    for n, pages in ((3, 1), (7, 2), (12, 2)):
+    for n, pages in ((3, 1), (7, 2), (12, 3)):
         os.environ["NEOCHUMBY_TREE"] = fake_tree(n)
         apps = appsscreen.full_apps()
+        check([a["name"] for a in apps[:2]] == ["radio", "somafm"] and all(a["music"] for a in apps[:2]),
+              "apps: music apps first")
+        apps = apps[2:]
         check(sorted(a["name"] for a in apps) == [f"game{k:02d}" for k in range(n)] and apps[0]["icon"],
               f"apps: {n} apps from the tree, without classic, home, one with no exec or a bad name")
         out = os.path.join(work, "apps", str(n))
@@ -434,7 +444,7 @@ def apps_screen(work):
         check(want <= screens and f"apps_p{pages}" not in screens, f"apps: {n} apps on {pages} page(s), with night copies")
         hots = [t for t in lines if t[0] == "hot" and t[1].startswith("apps_p")]
         opened = [t[7] for t in hots if t[6] == "app"]
-        check(sorted(opened) == sorted([a["name"] for a in apps] * 2) and all(re.fullmatch(r"[a-z0-9_-]{1,32}", a) for a in opened),
+        check(sorted(opened) == sorted([a["name"] for a in apps] * 2 + ["radio", "somafm"] * 2) and all(re.fullmatch(r"[a-z0-9_-]{1,32}", a) for a in opened),
               f"apps: every tile opens its app ('app NAME'), day and night ({len(opened)})")
         targets = {t[7] for t in hots if t[6] == "screen"}
         check(targets == {f"apps_p{p}" for p in range(pages)} | {"home"} if pages > 1 else targets == {"home"},
@@ -447,6 +457,16 @@ def apps_screen(work):
         check(not changed and not diff, f"apps: a second render writes nothing {diff[:5]}")
     home = [t for t in lines if t[0] == "hot" and t[1] == "home" and t[-2:] == ["screen", "apps_p0"]]
     check(len(home) == 1, "apps: Home's APPS opens them")
+    from neochumby_classic import admin
+    music = [("radio", "Radio"), ("somafm", "SomaFM")]
+    check(admin.default_music(None, music) == "somafm" and admin.default_music("radio", music) == "radio"
+          and admin.default_music("nope", music) == "somafm" and admin.default_music(None, music[:1]) == "radio"
+          and admin.default_music("radio", []) is None,
+          "apps: the starred music app is the Chumby's, else SomaFM, else the first")
+    plain = snapshot(out)
+    render.render(out, cfg, "kitchen", now=NOW, music="radio")
+    moved = sorted(f for f, v in snapshot(out).items() if plain.get(f) != v and f.endswith(".raw"))
+    check(moved and all(f.startswith("apps_p0") for f in moved), f"apps: the star follows the Chumby's music app {moved}")
     check(any(t[0] == "hot" and t[1] == "settings" and t[-2:] == ["screen", "configure"] for t in lines),
           "apps: Settings still leads to the web page's QR code")
     os.environ.pop("NEOCHUMBY_TREE")
@@ -598,8 +618,10 @@ class Neochumbyd(socketserver.ThreadingUnixStreamServer):
             return ["ok lounge" if w[2] == OWNER else "error wrong token"]
         if w[:1] == ["forget"] and len(w) == 3:
             return ["ok" if w[2] == OWNER else "error wrong token"]
-        if w[:1] == ["set"] and len(w) == 3 and "=" in w[2]:
+        if w[:1] == ["set"] and len(w) in (3, 4) and "=" in w[2]:
             k, v = w[2].split("=", 1)
+            if k == "music" and (len(w) != 4 or w[3] != OWNER):         # music= needs the owner's token
+                return ["error wrong token"]
             if w[1] not in self.paired:
                 return ["error no Chumby paired under that name"]
             self.paired[w[1]][k] = v
@@ -613,7 +635,9 @@ def tree(work):
     """A made-up neochumbyd tree: home and classic may be start apps, doom may not."""
     for app, man in (("home", "title=Apps\nexec=neochumby-home\nstart=true\n"),
                      ("classic", "title=Classic\nexec=neochumby-classic\nstart=true\n"),
-                     ("doom", "title=Doom\nexec=neochumby-doom\nbutton=true\n")):
+                     ("doom", "title=Doom\nexec=neochumby-doom\nbutton=true\n"),
+                     ("somafm", "title=SomaFM\nexec=neochumby-somafm\nmusic=true\n"),
+                     ("airplay", "title=AirPlay\nexec=neochumby-airplay\nservice=neochumby-airplayd\nmusic=true\n")):
         os.makedirs(os.path.join(work, "tree", "apps", app), exist_ok=True)
         with open(os.path.join(work, "tree", "apps", app, "manifest"), "w") as fh:
             fh.write(man)
@@ -711,6 +735,18 @@ def web(work, out):
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "set", "name": "kitchen", "start": "home", "delivery": "nfs"})
         check(code == 303 and ["set", "kitchen", f"{admin.START_SETTING}=home"] in nd.seen and ["set", "kitchen", "delivery=nfs"] in nd.seen,
               "web: start app and delivery are set")
+        _, body, _ = b.go("GET", "/chumbys")
+        check('<select name="music">' in body and ">Default (SomaFM)<" in body and 'value="airplay"' in body
+              and 'value="doom">' not in body.split('<select name="music">')[1].split("</select>")[0],
+              "web: the music app picker offers the default and the tree's music apps only")
+        code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "set", "name": "kitchen", "start": "home",
+                                             "music": "airplay", "delivery": "nfs"})
+        check(code == 303 and ["set", "kitchen", "music=airplay", OWNER] in nd.seen and nd.paired["kitchen"]["music"] == "airplay",
+              "web: the music app is set, with the signed-in owner's token")
+        n = len(nd.seen)
+        code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "set", "name": "kitchen", "start": "home",
+                                             "music": "doom", "delivery": "nfs"})
+        check(code == 400 and not any(w[:1] == ["set"] for w in nd.seen[n:]), "web: a music app that isn't one is refused, and nothing is set")
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "approve", "code": "123456"})
         check(code == 303 and ["approve", "123456", OWNER] in nd.seen, "web: approve passes the signed-in owner's token")
         code, _, _ = b.go("POST", "/admin", {"csrf": csrf, "action": "forget", "name": "kitchen"})

@@ -50,6 +50,9 @@ DELIVERY = ("nfs", "sync")
 # that lets an app be one (proposal 0002). Only these lines name them.
 START_SETTING = "start"
 START_MANIFEST_KEY = "start"
+MUSIC_SETTING = "music"                       # a Chumby's music app (neochumbyd set NAME music=APP)
+MUSIC_MANIFEST_KEY = "music"                  # music = true: an app that plays music (the session's flag)
+DEFAULT_MUSIC = "somafm"                      # the session's default, if it's in the tree
 DEFAULT_SOCKET = "/var/lib/neochumbyd/admin.sock"
 DEFAULT_TREE = "/var/lib/neochumbyd/tree"
 
@@ -215,10 +218,16 @@ def forget(name, token):
     client().ask("forget", name, token)
 
 
-def set_setting(name, key, value):
+def set_setting(name, key, value, token=None):
+    """set NAME KEY=VALUE, with the signed-in owner's token after it when neochumbyd wants one."""
     if not NAME.fullmatch(name or "") or not re.fullmatch(r"[a-z_]{1,32}", key) or not VALUE.fullmatch(value or ""):
         raise AdminError("not a valid setting")
-    client().ask("set", name, f"{key}={value}")
+    if token is None:
+        client().ask("set", name, f"{key}={value}")
+        return
+    if not OWNER_TOKEN.fullmatch(token or ""):
+        raise AdminError("sign in again")
+    client().ask("set", name, f"{key}={value}", token)
 
 
 def set_start(name, app):
@@ -226,6 +235,38 @@ def set_start(name, app):
     if app and app not in [a for a, _ in start_apps()]:
         raise AdminError("not a start app in this server's tree")
     set_setting(name, START_SETTING, app)
+
+
+def music_apps():
+    """[(app, title)] for every app in the tree that plays music and can be opened."""
+    try:
+        apps = sorted(os.listdir(os.path.join(tree_dir(), "apps")))
+    except OSError:
+        return []
+    out = []
+    for app in apps:
+        if NAME.fullmatch(app):
+            m = manifest(app)
+            if m.get(MUSIC_MANIFEST_KEY, "").strip().lower() == "true" and m.get("exec") and m.get("title"):
+                out.append((app, m["title"]))
+    return out
+
+
+def default_music(setting, apps=None):
+    """The music app a Chumby opens: its music= setting if that's a music app here, else the
+    session's default (somafm) if it's here, else the first by name, else None."""
+    names = [a for a, _ in (music_apps() if apps is None else apps)]
+    for cand in (setting, DEFAULT_MUSIC):
+        if cand and cand in names:
+            return cand
+    return names[0] if names else None
+
+
+def set_music(name, app, token):
+    """A Chumby's music app; "" goes back to the default. Needs the owner's token."""
+    if app and app not in [a for a, _ in music_apps()]:
+        raise AdminError("not a music app in this server's tree")
+    set_setting(name, MUSIC_SETTING, app, token)
 
 
 def set_delivery(name, how):

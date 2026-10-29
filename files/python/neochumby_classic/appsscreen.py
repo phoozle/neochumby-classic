@@ -7,13 +7,17 @@ stock app list (home). A tile shows the app's icon.png (in its directory, where 
 puts its files/) or, without one, its initial on a square of its colour, and its title in
 its colour. Each tile is a hot zone with the engine's action "app NAME", which the engine
 passes to the session as "open NAME" (the session refuses an app it doesn't have).
+Music apps (music = true) come first, with a note badge; the Chumby's own music app (its
+music= setting, else the session's default) has a star. Home's MUSIC opens that app, and
+this screen when there is none.
 
 Screens (stable names, a night copy each): apps_p0, apps_p1, ... six tiles a page, with
 PREV / NEXT between pages and DONE back to Home.
 
-    lines = appsscreen.render(out, rgb565, appsscreen.full_apps())
-    lines += appsscreen.render(out, rgb565, apps, night=True)
+    lines = appsscreen.render(out, rgb565, appsscreen.full_apps(), default="somafm")
+    lines += appsscreen.render(out, rgb565, apps, night=True, default="somafm")
 """
+import math
 import os
 import re
 
@@ -62,8 +66,9 @@ def full_apps(tree=None):
         if not title or not m.get("exec"):
             continue
         icon = next((p for p in (os.path.join(d, "icon.png"), os.path.join(d, "files", "icon.png")) if os.path.isfile(p)), None)
-        out.append({"name": name, "title": title, "colour": colour(m.get("colour")), "icon": icon})
-    return sorted(out, key=lambda a: (a["title"].lower(), a["name"]))[:MAX_APPS]
+        out.append({"name": name, "title": title, "colour": colour(m.get("colour")), "icon": icon,
+                    "music": m.get("music", "").lower() == "true"})
+    return sorted(out, key=lambda a: (not a["music"], a["title"].lower(), a["name"]))[:MAX_APPS]
 
 
 def _icon(path):
@@ -79,8 +84,15 @@ def _icon(path):
         return None
 
 
-def tile(img, d, a, x, y):
-    """One app's tile at (x, y), on the supersampled screen."""
+def star(d, cx, cy, r, fill):
+    pts = [(cx + (r if k % 2 == 0 else r * .45) * math.sin(k * math.pi / 5),
+            cy - (r if k % 2 == 0 else r * .45) * math.cos(k * math.pi / 5)) for k in range(10)]
+    d.polygon(pts, fill=fill)
+
+
+def tile(img, d, a, x, y, default=False):
+    """One app's tile at (x, y), on the supersampled screen: a note badge if it plays music,
+    a star if it's the Chumby's music app."""
     T, f = screens.T, screens.f
     d.rounded_rectangle([x * SS, y * SS, (x + TILE_W) * SS, (y + TILE_H) * SS], radius=10 * SS, fill=T["box"],
                         outline=T["frame1"], width=SS)
@@ -99,18 +111,23 @@ def tile(img, d, a, x, y):
     if screens.T is screens.NIGHT:                      # on the night navy a dark colour would vanish: lighten it
         ink = tuple(int(v + (255 - v) * 0.35) for v in ink)
     d.text((cx, (y + TILE_H - 13) * SS), title, font=fnt, fill=ink, anchor="mm")
+    if a.get("music"):
+        screens.icon(d, "note", (x + 12) * SS, (y + 12) * SS, 13 * SS, T["sub"])
+    if default:
+        star(d, (x + TILE_W - 12) * SS, (y + 12) * SS, 7 * SS, (240, 180, 30))
 
 
-def render(out, rgb565, apps, night=False):
+def render(out, rgb565, apps, night=False, default=None):
+    """The APPS screens; default: the Chumby's music app (starred), or None."""
     saved = screens.T                                   # screens' theme is a module global: restore it
     screens.T = screens.NIGHT if night else screens.LIGHT
     try:
-        return _render(out, rgb565, apps, "_night" if night else "")
+        return _render(out, rgb565, apps, "_night" if night else "", default)
     finally:
         screens.T = saved
 
 
-def _render(out, rgb565, apps, sfx):
+def _render(out, rgb565, apps, sfx, default):
     T, f = screens.T, screens.f
     pages = max(1, -(-len(apps) // PER_PAGE))
     lines = []
@@ -123,7 +140,7 @@ def _render(out, rgb565, apps, sfx):
             d.text((160 * SS, 122 * SS), "Apps installed in neochumbyd's tree show here.", font=f(screens.VERD, 8),
                    fill=T["sub"], anchor="mm")
         for k, a in enumerate(mine):
-            tile(img, d, a, GRID_X + (k % COLS) * (TILE_W + 8), GRID_Y + (k // COLS) * (TILE_H + 6))
+            tile(img, d, a, GRID_X + (k % COLS) * (TILE_W + 8), GRID_Y + (k // COLS) * (TILE_H + 6), a["name"] == default)
         if p > 0:
             screens.pill(d, PREV_BOX, "PREV")
         if p < pages - 1:

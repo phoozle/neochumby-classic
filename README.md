@@ -3,8 +3,14 @@
 The classic Chumby experience for [neochumby](https://github.com/johnmerchant/neochumby):
 a 90s weather channel for anywhere in Australia, ABC News, stock quotes, your photos and a
 Vista-style aurora screensaver (and, if you add them, the Whyalla News and a Pajama Sam
-screensaver from your own copies of the games), with Home, Settings and Music screens, and
+screensaver from your own copies of the games), with Home, Settings and APPS screens, and
 a "my channels" web page modelled on chumby.com's.
+
+Music is a neochumby app of its own (SomaFM, AirPlay and others; any app whose manifest says
+`music = true`). Home's MUSIC opens the Chumby's music app, MUTE pauses and resumes it, and
+APPS lists the music apps first, with a star on that Chumby's. Choose each Chumby's music
+app on the web page's **chumbys** page (signed in as the server owner); without a choice,
+it is SomaFM if the server has it.
 
 The Chumby (a 266 MHz ARM with no FPU) only copies pictures to its screen. Everything hard
 (fetching, parsing, fonts, layout) happens here, on the server beside neochumbyd: this
@@ -220,7 +226,6 @@ your own home, and certainly before anyone redistributes what it draws.
 | The Whyalla News' WordPress RSS feed (`whyallanewsonline.com.au/feed/`) and the photos it links | Whyalla News | The paper's terms. The widget reads only the RSS feed (the site refuses scripts, and it doesn't try to get round that) and **respects the paywall**: a subscriber-only story shows only the free excerpt the feed carries, ending "Continue at whyallanewsonline.com.au"; full text only where the feed itself carries it |
 | Yahoo Finance's chart endpoint (`query1.finance.yahoo.com/v8/finance/chart`) | Stocks | Unofficial and undocumented. Yahoo's terms allow personal use, not redistribution |
 | financialmodelingprep.com, assets.parqet.com | Stock logos | Unofficial. The logos are the companies' trademarks; they are fetched and cached on your server, never committed |
-| SomaFM's API and streams | Music | SomaFM's terms for its API and channel artwork |
 
 The weather has no default place: you choose it. Whyalla (South Australia) appears only as an
 example, in the help text and the tests. The Whyalla News is that town's paper, an optional

@@ -1,21 +1,17 @@
-"""screens: the Home screen (2008 Chumby control panel look), Settings (the stock
-Chumby settings screen's look) and the Music app (2008 Pandora-on-Chumby look),
-pre-rendered for the engine.
+"""screens: the Home screen (2008 Chumby control panel look) and Settings (the stock
+Chumby settings screen's look), pre-rendered for the engine. Music is a neochumby app of
+its own (Home's MUSIC opens the Chumby's music app; appsscreen.py lists them).
 
 The device knows nothing about buttons or lists. Each screen is a background plus:
-  pane   a picture chosen by a state variable (music, station, night, nightmode, pin, page, secs)
+  pane   a picture chosen by a state variable (music, night, nightmode, pin, page, secs, wifi)
   hot    a tap zone with an action
   slider the volume slider
 so new screens need no engine changes. docs/widgets.md lists the actions.
 """
-import io
 import math
-import re
-import urllib.request
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import config
 from . import assets
 from .widget import LIVE_CHARSET
 
@@ -27,7 +23,6 @@ VERD, VERDB = FD + "DejaVuSans.ttf", FD + "DejaVuSans-Bold.ttf"   # stand in for
 NAVY = (40, 70, 150)
 KEY = (255, 0, 255)                              # 0xF81F: transparent in glyph strips
 INK = (35, 60, 130)
-UA = config.USER_AGENT
 
 
 def paste_logo(img, cx, cy, height):
@@ -61,7 +56,6 @@ NIGHT = dict(bg_top=(10, 14, 36), bg_bot=(24, 32, 70), swirl=(26, 36, 78), panel
 T = LIGHT
 
 
-STATIONS = ["groovesalad", "dronezone", "deepspaceone", "lush", "secretagent", "spacestation"]
 
 
 def f(path, size):
@@ -86,37 +80,6 @@ def grad(d, box, top, bot, horizontal=False):
             d.line([(x0 + i, y0), (x0 + i, y1)], fill=c)
         else:
             d.line([(x0, y0 + i), (x1, y0 + i)], fill=c)
-
-
-# ---------------------------------------------------------------- stations
-def fetch(url):
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=30) as r:
-        return r.read()
-
-
-def get_stations():
-    """Title, description, artwork and a plain-HTTP MP3 URL for each station."""
-    import json
-    chans = {c["id"]: c for c in json.loads(fetch("https://api.somafm.com/channels.json"))["channels"]}
-    out = []
-    for sid in STATIONS:
-        c = chans.get(sid)
-        if not c:
-            continue
-        url = f"http://ice6.somafm.com/{sid}-128-mp3"
-        try:   # prefer what SomaFM's own MP3 playlist says, but only a plain-http server
-            pls = fetch(f"https://api.somafm.com/{sid}.pls").decode("latin-1")
-            m = re.search(r"File\d=(http://[^\s]+)", pls)
-            if m:
-                url = m.group(1).strip()
-        except Exception:
-            pass
-        try:
-            art = Image.open(io.BytesIO(fetch(c["image"]))).convert("RGB")
-        except Exception:
-            art = Image.new("RGB", (120, 120), (90, 110, 160))
-        out.append({"id": sid, "title": c["title"], "desc": c["description"], "url": url, "art": art})
-    return out
 
 
 # ---------------------------------------------------------------- 2008 widgets
@@ -278,7 +241,7 @@ HOME_BTNS = [  # (label, icon, cx, cy, action)
     ("MUTE", "speaker", 228, 82, "music_toggle"),
     ("CHANNEL", "clock", 284, 82, "next_app"),
     ("NIGHT", "moon", 228, 140, "night"),
-    ("MUSIC", "note", 284, 140, "screen music"),
+    ("MUSIC", "note", 284, 140, "music apps_p0"),             # the Chumby's music app; without one, APPS
     ("SETTINGS", "wrench", 228, 198, "screen settings"),
     ("APPS", "grid", 284, 198, "screen apps_p0"),             # the neochumby apps (appsscreen.py); ALARMS here on the real one
 ]
@@ -458,123 +421,6 @@ def confirm_screen(out, rgb565, home_bg, sfx=""):
             f"hot {c} 164 {y1 - 44} {x1 - 164 - 6} 36 chumby",
             f"hot {c} 0 0 320 56 screen home",               # tapping outside the dialog cancels
             f"hot {c} 0 {y1 + 6} 320 {240 - y1 - 6} screen home"]
-
-
-# ---------------------------------------------------------------- Music (Pandora-on-Chumby style)
-def music_background():
-    img = Image.new("RGB", (W * SS, H * SS))
-    d = ImageDraw.Draw(img)
-    grad(d, (0, 0, W * SS, H * SS), (236, 238, 242), (214, 218, 226))
-    grad(d, (0, 0, W * SS, 22 * SS), (250, 250, 252), (222, 226, 234))         # top bar
-    d.line([(0, 22 * SS), (W * SS, 22 * SS)], fill=(170, 175, 190), width=SS)
-    d.text((10 * SS, 4 * SS), "SOMA", font=f(ROUND, 13), fill=(30, 40, 70))
-    d.text((52 * SS, 4 * SS), "FM", font=f(ROUND, 13), fill=(200, 60, 40))
-    d.text((84 * SS, 7 * SS), "listener-supported radio", font=f(VERD, 7), fill=(120, 125, 140))
-    # station list panel
-    d.rounded_rectangle([6 * SS, 26 * SS, 176 * SS, 206 * SS], radius=4 * SS, fill=(255, 255, 255), outline=(170, 175, 190), width=SS)
-    grad(d, (7 * SS, 27 * SS, 175 * SS, 41 * SS), (232, 234, 240), (208, 212, 222))
-    d.text((12 * SS, 29 * SS), "Your Stations", font=f(VERDB, 8), fill=(70, 75, 95))
-    # now-playing panel
-    d.rounded_rectangle([182 * SS, 26 * SS, 314 * SS, 206 * SS], radius=4 * SS, fill=(250, 251, 253), outline=(170, 175, 190), width=SS)
-    # transport bar
-    grad(d, (0, 210 * SS, W * SS, H * SS), (205, 210, 220), (175, 180, 194))
-    d.line([(0, 210 * SS), (W * SS, 210 * SS)], fill=(150, 155, 170), width=SS)
-    d.rounded_rectangle([262 * SS, 215 * SS, 312 * SS, 235 * SS], radius=9 * SS, fill=(245, 246, 250), outline=(120, 125, 145), width=SS)
-    d.text((287 * SS, 225 * SS), "DONE", font=f(VERDB, 9), fill=(50, 55, 75), anchor="mm")
-    for cx, kind in ((52, "next"),):                               # skip button (static)
-        glossy_button(d, cx * SS, 225 * SS, 11 * SS)
-        icon(d, kind, cx * SS, 225 * SS, 13 * SS)
-    return small(img)
-
-
-ROW_Y0, ROW_H = 43, 27
-
-
-def music(out, rgb565, stations):
-    bg = music_background()
-    rgb565(bg, f"{out}/music.raw")
-    lines = ["screen music music.raw"]
-    for i, s in enumerate(stations):
-        lines.append(f"station {i} {s['id']} {s['url']}")
-    # station list: one frame per selected station
-    lw, lh = 168, ROW_H * len(stations)
-    lx, ly = 7, ROW_Y0
-    frames = []
-    for sel in range(len(stations)):
-        im = Image.new("RGB", (lw * SS, lh * SS), (255, 255, 255))
-        d = ImageDraw.Draw(im)
-        for i, s in enumerate(stations):
-            y = i * ROW_H * SS
-            if i == sel:
-                grad(d, (0, y, lw * SS, y + ROW_H * SS - SS), (110, 150, 230), (60, 100, 200))
-                col = (255, 255, 255)
-            else:
-                col = (40, 45, 65)
-            d.line([(0, y + ROW_H * SS - SS), (lw * SS, y + ROW_H * SS - SS)], fill=(225, 228, 236), width=SS)
-            d.text((8 * SS, y + ROW_H * SS / 2), s["title"], font=f(VERDB if i == sel else VERD, 10), fill=col, anchor="lm")
-        frames.append(small(im))
-    sheet = Image.new("RGB", (lw, lh * len(frames)))
-    for i, fr in enumerate(frames):
-        sheet.paste(fr, (0, i * lh))
-    rgb565(sheet, f"{out}/music_list.raw")
-    lines.append(f"pane music music_list.raw {lw} {lh} {lx} {ly} station {len(frames)}")
-    for i in range(len(stations)):
-        lines.append(f"hot music {lx} {ly + i * ROW_H} {lw} {ROW_H} station {i}")
-    # now-playing card: art + title + description, one frame per station
-    cw, chh, cx, cy = 130, 178, 183, 27
-    cards = []
-    for s in stations:
-        im = Image.new("RGB", (cw * SS, chh * SS), (250, 251, 253))
-        d = ImageDraw.Draw(im)
-        d.text((cw * SS / 2, 6 * SS), s["title"], font=f(VERDB, 10), fill=(30, 40, 70), anchor="ma")
-        art = s["art"].resize((92 * SS, 92 * SS), Image.LANCZOS)
-        ax = (cw - 92) // 2
-        d.rectangle([(ax - 2) * SS, 22 * SS, (ax + 93) * SS, 117 * SS], fill=(255, 255, 255), outline=(160, 165, 180), width=SS)
-        im.paste(art, (ax * SS, 24 * SS))
-        fnt = f(VERD, 7)
-        words, line, y = s["desc"].split(), "", 122
-        for w in words:
-            t = (line + " " + w).strip()
-            if fnt.getlength(t) > (cw - 10) * SS:
-                d.text((cw * SS / 2, y * SS), line, font=fnt, fill=(80, 85, 105), anchor="ma")
-                line, y = w, y + 10
-                if y > chh - 12:
-                    break
-            else:
-                line = t
-        if y <= chh - 12:
-            d.text((cw * SS / 2, y * SS), line, font=fnt, fill=(80, 85, 105), anchor="ma")
-        cards.append(small(im))
-    csheet = Image.new("RGB", (cw, chh * len(cards)))
-    for i, fr in enumerate(cards):
-        csheet.paste(fr, (0, i * chh))
-    rgb565(csheet, f"{out}/music_card.raw")
-    lines.append(f"pane music music_card.raw {cw} {chh} {cx} {cy} station {len(cards)}")
-    # play/pause: 0 = stopped (show play), 1 = playing (show pause)
-    ps, px, py = 26, 8, 212
-    crop = bg.crop((px, py, px + ps, py + ps))
-    frs = []
-    for state in (0, 1):
-        im = Image.new("RGBA", (ps * SS, ps * SS), (0, 0, 0, 0))
-        d = ImageDraw.Draw(im)
-        glossy_button(d, ps * SS / 2, ps * SS / 2, 11 * SS)
-        icon(d, "pause" if state else "play", ps * SS / 2, ps * SS / 2, 13 * SS)
-        frs.append(on_bg(crop, im))
-    sh = Image.new("RGB", (ps, ps * 2))
-    for i, fr in enumerate(frs):
-        sh.paste(fr, (0, i * ps))
-    rgb565(sh, f"{out}/music_play.raw")
-    lines.append(f"pane music music_play.raw {ps} {ps} {px} {py} music 2")
-    lines += ["hot music 2 210 34 30 music_toggle", "hot music 36 210 32 30 next_station",
-              "hot music 256 210 62 30 screen home"]
-    # volume slider in the transport bar
-    sw, sx, sy = 186, 70, 212
-    (empty, full), knob, k, sh_ = slider_assets(sw, (10, 176))
-    for name, im in (("music_vol_empty", empty), ("music_vol_full", full)):
-        rgb565(on_bg(bg.crop((sx, sy, sx + sw, sy + sh_)), im), f"{out}/{name}.raw")
-    rgb565(keyed(knob), f"{out}/music_vol_knob.raw")
-    lines.append(f"slider music music_vol_empty.raw music_vol_full.raw music_vol_knob.raw {sw} {sh_} {sx} {sy} 10 176 {k} {k}")
-    return lines
 
 
 # ---------------------------------------------------------------- Settings (the stock Chumby settings screen)
