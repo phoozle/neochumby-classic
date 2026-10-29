@@ -175,16 +175,18 @@ Actions: `slideshow` (back to the slideshow, to the page a `pagetap` came from),
 
 - `app NAME`: open neochumby app NAME full screen (the engine asks the session to `open`
   it, and the session refuses an app it doesn't have);
-- `music SCREEN`: open the Chumby's music app (the session's `$NEOCHUMBY_MUSIC`: its
-  `music=` setting, else the default), or show `SCREEN` if it has none (Home's MUSIC:
-  `music apps_p0`);
-- `music_toggle`: pause or resume the music app (the engine sends `music toggle` to the
-  session, which tells the music app's service).
+- `player SCREEN`: open the Chumby's player, the app that plays its music (the session's
+  `$NEOCHUMBY_PLAYER`: its `player=` setting, else the default), or show `SCREEN` if it has
+  none (Home's MUSIC: `player apps_p0`);
+- `player_toggle`: pause or resume the player (the engine sends `player toggle` to the
+  session, which tells the player's service). The engine still takes the C engine's
+  `music_toggle` for it.
 
-State variables for panes: `music`, `night`, `nightmode`, `pin`, `secs`, `app`, and the
-live values `wifi` (0-4 bars) and `wifi_pct`. (The engine also still has `station N`,
-`next_station` and the `station` directive from when classic played radio itself; nothing
-here uses them: music is an app of its own now.)
+State variables for panes: `player` (MUTE's face: 1 playing, 0 paused; the engine also
+takes the C engine's `music`), `night`, `nightmode`, `pin`, `secs`, `app`, and the
+live values `wifi` (0-4 bars) and `wifi_pct`. (Engines from before players also had
+`station N`, `next_station` and the `station` directive, from when classic played radio
+itself; nothing here uses them, and the current engine skips them.)
 
 ### Live values
 

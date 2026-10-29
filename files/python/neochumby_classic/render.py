@@ -7,7 +7,7 @@ adds what belongs to no widget (Home, Settings, APPS, the sun times for night mo
 checks what the widgets wrote, and finishes the directory. docs/interface.md describes
 the result: manifest.txt, the RGB565 and L8 files it names, hashes.txt and version.
 
-Usage: neochumby-classic-render OUTDIR [--config FILE] [--chumby NAME] [--info FILE] [--music APP]
+Usage: neochumby-classic-render OUTDIR [--config FILE] [--chumby NAME] [--info FILE] [--player APP]
 
 Every file is written only if its bytes changed, and atomically, so a reader never sees
 half a file; a render that changes nothing writes nothing, manifest and version included.
@@ -368,9 +368,9 @@ def timezone(name):
         return ZoneInfo(config.DEFAULT_TZ)
 
 
-def render(out, cfg, chumby=None, info_path=None, now=None, music=None):
-    """Render `chumby`'s channel into `out`. Returns True if anything changed. music: the
-    Chumby's music= setting (from neochumbyd's paired list), for the star on APPS.
+def render(out, cfg, chumby=None, info_path=None, now=None, player=None):
+    """Render `chumby`'s channel into `out`. Returns True if anything changed. player: the
+    Chumby's player= setting (from neochumbyd's paired list), for the star on APPS.
     A widget that raises fails the whole render: the last good output stays as it was."""
     os.makedirs(out, exist_ok=True)
     screens.T = screens.LIGHT                              # screens' theme is a module global (widgets draw with it too)
@@ -443,7 +443,7 @@ def render(out, cfg, chumby=None, info_path=None, now=None, music=None):
     man += screens.settings(out, write, info)
     man += screens.settings(out, write, info, night=True)
     apps = appsscreen.full_apps()                          # Home -> APPS: the neochumby apps in the tree
-    fav = admin.default_music(music, [(a["name"], a["title"]) for a in apps if a["music"]])
+    fav = admin.default_player(player, [(a["name"], a["title"]) for a in apps if a["player"]])
     man += appsscreen.render(out, write, apps, default=fav)
     man += appsscreen.render(out, write, apps, night=True, default=fav)
     url = g["config_url"]                                  # Settings -> WEB PAGE: the QR code for the web page
@@ -468,14 +468,14 @@ def main(argv=None):
     ap.add_argument("--config", default=None, help="the config file (default: see config.default_path)")
     ap.add_argument("--chumby", default=None, help="the Chumby's name (picks its channel)")
     ap.add_argument("--info", default=None, help="a key=value file of facts about the Chumby")
-    ap.add_argument("--music", default=None, help="the Chumby's music app setting (neochumbyd's music=)")
+    ap.add_argument("--player", default=None, help="the Chumby's player setting (neochumbyd's player=)")
     a = ap.parse_args(argv)
     if a.chumby is not None and not re.fullmatch(config.CHUMBY_NAME, a.chumby):
         ap.error("not a Chumby's name")
     try:
-        if a.music is not None and not re.fullmatch(config.CHUMBY_NAME, a.music):
+        if a.player is not None and not re.fullmatch(config.CHUMBY_NAME, a.player):
             ap.error("not an app's name")
-        render(a.out, config.load(a.config), a.chumby, a.info, music=a.music)
+        render(a.out, config.load(a.config), a.chumby, a.info, player=a.player)
     except WidgetError as e:
         print(f"render: {e}", file=sys.stderr)
         return 2

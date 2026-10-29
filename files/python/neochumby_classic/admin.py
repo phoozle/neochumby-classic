@@ -51,9 +51,9 @@ DELIVERY = ("nfs", "sync")
 # that lets an app be one (proposal 0002). Only these lines name them.
 START_SETTING = "start"
 START_MANIFEST_KEY = "start"
-MUSIC_SETTING = "music"                       # a Chumby's music app (neochumbyd set NAME music=APP)
-MUSIC_MANIFEST_KEY = "music"                  # music = true: an app that plays music (the session's flag)
-DEFAULT_MUSIC = "somafm"                      # the session's default, if it's in the tree
+PLAYER_SETTING = "player"                     # a Chumby's player (neochumbyd set NAME player=APP)
+PLAYER_MANIFEST_KEY = "player"                # player = true: an app that plays music (the session's flag)
+DEFAULT_PLAYER = "somafm"                     # the session's default, if it's in the tree
 DEFAULT_SOCKET = "/var/lib/neochumbyd/admin.sock"
 DEFAULT_TREE = "/var/lib/neochumbyd/tree"
 
@@ -237,8 +237,8 @@ def set_start(name, app, token):
     set_setting(name, START_SETTING, app, token)
 
 
-def music_apps():
-    """[(app, title)] for every app in the tree that plays music and can be opened."""
+def players():
+    """[(app, title)] for every player in the tree (an app that plays music) that can be opened."""
     try:
         apps = sorted(os.listdir(os.path.join(tree_dir(), "apps")))
     except OSError:
@@ -247,26 +247,26 @@ def music_apps():
     for app in apps:
         if NAME.fullmatch(app):
             m = manifest(app)
-            if m.get(MUSIC_MANIFEST_KEY, "").strip().lower() == "true" and m.get("exec") and m.get("title"):
+            if m.get(PLAYER_MANIFEST_KEY, "").strip().lower() == "true" and m.get("exec") and m.get("title"):
                 out.append((app, m["title"]))
     return out
 
 
-def default_music(setting, apps=None):
-    """The music app a Chumby opens: its music= setting if that's a music app here, else the
+def default_player(setting, apps=None):
+    """The player a Chumby's MUSIC opens: its player= setting if that's a player here, else the
     session's default (somafm) if it's here, else the first by name, else None."""
-    names = [a for a, _ in (music_apps() if apps is None else apps)]
-    for cand in (setting, DEFAULT_MUSIC):
+    names = [a for a, _ in (players() if apps is None else apps)]
+    for cand in (setting, DEFAULT_PLAYER):
         if cand and cand in names:
             return cand
     return names[0] if names else None
 
 
-def set_music(name, app, token):
-    """A Chumby's music app; "" goes back to the default. Needs the owner's token."""
-    if app and app not in [a for a, _ in music_apps()]:
-        raise AdminError("not a music app in this server's tree")
-    set_setting(name, MUSIC_SETTING, app, token)
+def set_player(name, app, token):
+    """A Chumby's player; "" goes back to the default. Needs the owner's token."""
+    if app and app not in [a for a, _ in players()]:
+        raise AdminError("not a player in this server's tree")
+    set_setting(name, PLAYER_SETTING, app, token)
 
 
 def set_delivery(name, how, token):

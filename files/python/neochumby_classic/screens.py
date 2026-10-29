@@ -1,9 +1,9 @@
 """screens: the Home screen (2008 Chumby control panel look) and Settings (the stock
 Chumby settings screen's look), pre-rendered for the engine. Music is a neochumby app of
-its own (Home's MUSIC opens the Chumby's music app; appsscreen.py lists them).
+its own, a player (Home's MUSIC opens the Chumby's player; appsscreen.py lists them).
 
 The device knows nothing about buttons or lists. Each screen is a background plus:
-  pane   a picture chosen by a state variable (music, night, nightmode, pin, page, secs, wifi)
+  pane   a picture chosen by a state variable (player, night, nightmode, pin, page, secs, wifi)
   hot    a tap zone with an action
   slider the volume slider
 so new screens need no engine changes. docs/widgets.md lists the actions.
@@ -238,10 +238,10 @@ def on_bg(bg_crop, rgba):
 
 # ---------------------------------------------------------------- Home
 HOME_BTNS = [  # (label, icon, cx, cy, action)
-    ("MUTE", "speaker", 228, 82, "music_toggle"),
+    ("MUTE", "speaker", 228, 82, "player_toggle"),
     ("CHANNEL", "clock", 284, 82, "next_app"),
     ("NIGHT", "moon", 228, 140, "night"),
-    ("MUSIC", "note", 284, 140, "music apps_p0"),             # the Chumby's music app; without one, APPS
+    ("MUSIC", "note", 284, 140, "player apps_p0"),            # the Chumby's player; without one, APPS
     ("SETTINGS", "wrench", 228, 198, "screen settings"),
     ("APPS", "grid", 284, 198, "screen apps_p0"),             # the neochumby apps (appsscreen.py); ALARMS here on the real one
 ]
@@ -334,7 +334,7 @@ def home(out, rgb565, page_titles, page_thumbs, night=False):
         sheet.paste(fr, (0, i * ch))
     rgb565(sheet, f"{out}/{scr}_card.raw")
     lines.append(f"pane {scr} {scr}_card.raw {cw} {ch} {cx0} {cy0} app {len(frames)}")
-    # MUTE button face: 0 = music off (muted), 1 = playing
+    # MUTE button face: 0 = player paused (muted), 1 = playing
     mx, my = 228, 82
     s = BTN_R * 2 + 4
     crop = bg.crop((mx - s // 2, my - s // 2, mx + s // 2, my + s // 2))
@@ -349,7 +349,7 @@ def home(out, rgb565, page_titles, page_thumbs, night=False):
     for i, fr in enumerate(mframes):
         msheet.paste(fr, (0, i * s))
     rgb565(msheet, f"{out}/{scr}_mute.raw")
-    lines.append(f"pane {scr} {scr}_mute.raw {s} {s} {mx - s // 2} {my - s // 2} music 2")
+    lines.append(f"pane {scr} {scr}_mute.raw {s} {s} {mx - s // 2} {my - s // 2} player 2")
     # toggles (NIGHT, STAY): drawn like a disabled button when off, label
     # included, and as a normal button when on. Pane covers the button and its arched label.
     for label, kind, cx, cy, action in HOME_BTNS + HOME_BOTTOM:

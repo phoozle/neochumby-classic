@@ -6,11 +6,11 @@ Vista-style aurora screensaver (and, if you add them, the Whyalla News and a Paj
 screensaver from your own copies of the games), with Home, Settings and APPS screens, and
 a "my channels" web page modelled on chumby.com's.
 
-Music is a neochumby app of its own (SomaFM, AirPlay and others; any app whose manifest says
-`music = true`). Home's MUSIC opens the Chumby's music app, MUTE pauses and resumes it, and
-APPS lists the music apps first, with a star on that Chumby's. Choose each Chumby's music
-app on the web page's **chumbys** page (signed in as the server owner); without a choice,
-it is SomaFM if the server has it.
+Music is a neochumby app of its own, a *player* (SomaFM, AirPlay and others; any app whose
+manifest says `player = true`). Home's MUSIC opens the Chumby's player, MUTE pauses and
+resumes it, and APPS lists the players first, with a star on that Chumby's. Choose each
+Chumby's player on the web page's **chumbys** page (signed in as the server owner); without
+a choice, it is SomaFM if the server has it.
 
 The Chumby (a 266 MHz ARM with no FPU) only copies pictures to its screen. Everything hard
 (fetching, parsing, fonts, layout) happens here, on the server beside neochumbyd: this

@@ -7,9 +7,9 @@ stock app list (home). A tile shows the app's icon.png (in its directory, where 
 puts its files/) or, without one, its initial on a square of its colour, and its title in
 its colour. Each tile is a hot zone with the engine's action "app NAME", which the engine
 passes to the session as "open NAME" (the session refuses an app it doesn't have).
-Music apps (music = true) come first, with a note badge; the Chumby's own music app (its
-music= setting, else the session's default) has a star. Home's MUSIC opens that app, and
-this screen when there is none.
+Players (player = true: apps that play music) come first, with a note badge; the Chumby's
+own player (its player= setting, else the session's default) has a star. Home's MUSIC opens
+that app, and this screen when there is none.
 
 Screens (stable names, a night copy each): apps_p0, apps_p1, ... six tiles a page, with
 PREV / NEXT between pages and DONE back to Home.
@@ -67,8 +67,8 @@ def full_apps(tree=None):
             continue
         icon = next((p for p in (os.path.join(d, "icon.png"), os.path.join(d, "files", "icon.png")) if os.path.isfile(p)), None)
         out.append({"name": name, "title": title, "colour": colour(m.get("colour")), "icon": icon,
-                    "music": m.get("music", "").lower() == "true"})
-    return sorted(out, key=lambda a: (not a["music"], a["title"].lower(), a["name"]))[:MAX_APPS]
+                    "player": m.get("player", "").lower() == "true"})
+    return sorted(out, key=lambda a: (not a["player"], a["title"].lower(), a["name"]))[:MAX_APPS]
 
 
 def _icon(path):
@@ -91,8 +91,8 @@ def star(d, cx, cy, r, fill):
 
 
 def tile(img, d, a, x, y, default=False):
-    """One app's tile at (x, y), on the supersampled screen: a note badge if it plays music,
-    a star if it's the Chumby's music app."""
+    """One app's tile at (x, y), on the supersampled screen: a note badge if it's a player,
+    a star if it's the Chumby's player."""
     T, f = screens.T, screens.f
     d.rounded_rectangle([x * SS, y * SS, (x + TILE_W) * SS, (y + TILE_H) * SS], radius=10 * SS, fill=T["box"],
                         outline=T["frame1"], width=SS)
@@ -111,14 +111,14 @@ def tile(img, d, a, x, y, default=False):
     if screens.T is screens.NIGHT:                      # on the night navy a dark colour would vanish: lighten it
         ink = tuple(int(v + (255 - v) * 0.35) for v in ink)
     d.text((cx, (y + TILE_H - 13) * SS), title, font=fnt, fill=ink, anchor="mm")
-    if a.get("music"):
+    if a.get("player"):
         screens.icon(d, "note", (x + 12) * SS, (y + 12) * SS, 13 * SS, T["sub"])
     if default:
         star(d, (x + TILE_W - 12) * SS, (y + 12) * SS, 7 * SS, (240, 180, 30))
 
 
 def render(out, rgb565, apps, night=False, default=None):
-    """The APPS screens; default: the Chumby's music app (starred), or None."""
+    """The APPS screens; default: the Chumby's player (starred), or None."""
     saved = screens.T                                   # screens' theme is a module global: restore it
     screens.T = screens.NIGHT if night else screens.LIGHT
     try:
