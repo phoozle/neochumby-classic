@@ -1,11 +1,11 @@
 # The widget API, version 1
 
 A **widget** is one app in a Chumby's channel: Weather, ABC News, Whyalla News, Stock
-Quotes, Photos, the Aurora screensaver, the Pajama Sam screensaver. Each is a Python module that draws its pages and screens as
+Quotes, Photos, the Aurora screensaver, the Flurry screensaver, the Pajama Sam screensaver. Each is a Python module that draws its pages and screens as
 pictures, ahead of time, on the server. The Chumby only copies those pictures to its
 screen. This page is everything a widget needs to know.
 
-The seven built-in widgets live in [`files/python/neochumby_classic/widgets/`](../files/python/neochumby_classic/widgets/)
+The eight built-in widgets live in [`files/python/neochumby_classic/widgets/`](../files/python/neochumby_classic/widgets/)
 and are found exactly as an outside widget would be: through an entry point.
 
 ## Versioning
@@ -158,6 +158,7 @@ manifest by their file name only.
 | `glow N FILE W H Y SPEED [FADE_MS PHASE_MS SWAY_PX SWAY_MS [X0 [ON_MS]]]` | a strip of light, added (saturating) at row Y, panning; several make parallax |
 | `glowseq N PREFIX NFRAMES FPS R G B BRIGHT` | a looping clip of light frames `PREFIX_000.l8` ... (format in [interface.md](interface.md#the-files)) |
 | `clip N DIR NAME [NAME ...] [random]` | the page plays a looping clip (clip format v1, [neochumby-scummvm's docs/clip-format.md](https://github.com/phoozle/neochumby-scummvm/blob/main/docs/clip-format.md)): files `NAME.idx` and `NAME.clip` in `DIR`, which is `.` (beside the manifest: the widget writes them like any other file); with several names and `random`, a random one each time the page comes on. Provisional: the engine's directive is being added in neochumby #11, and this follows its plan |
+| `flurry N [PRESET] [KEY=VALUE ...]` | the engine draws the Flurry screensaver (Calum Robinson's, BSD licence) live over the whole page: `PRESET` is `classic` (the default), `rgb`, `water`, `fire`, `psychedelic` or `random`; options `streams=1..16`, `colour=` (`red`, `magenta`, `blue`, `cyan`, `green`, `yellow`, `slowcyclic`, `cyclic`, `tiedye`, `rainbow`, `white`, `multi`, `dark`), `speed=0..4`, `thickness=1..20000`, `bright=0.0625..4`, `seed=`, `puffs=64..3600`, `rate=10..121`; an unknown key is ignored. The page's file is drawn over (the widget's is a still, for engines without the directive). In neochumby's classic engine from johnmerchant/neochumby#60 |
 | `logofx N FILE W H X Y [FX [MODE [HOLD]]]` | a logo that builds itself with a demoscene intro (`random`, `fly`, `print`, `wobble`, `zoom`, `drop`, `dissolve`, `raster`, `decrunch`, `spin`, `octopus`) |
 
 **Screens** (interactive, outside the slideshow):
@@ -266,6 +267,7 @@ memory. So:
   | `actor` | actors | 128 |
   | `glow` | light layers | 32 |
   | `glowseq` | light clips (1000 frames each) | 8 |
+  | `flurry` | Flurry pages | 8 |
   | `station` | music stations | 64 |
   | `sun` | sunrise/sunset days | 32 |
   | `secsopts` | slideshow timings | 12 |
@@ -279,7 +281,7 @@ memory. So:
   sizes are within -32768..32767, and `manifest.txt` and `hashes.txt` at most 2 MB each.
   The engine skips a line past any of these; the renderer refuses the render instead.
 
-  With every built-in widget on, a channel uses 17 pages, 109 screens, 23 panes, 485 hot zones,
+  With every built-in widget on, a channel uses 18 pages, 109 screens, 23 panes, 485 hot zones,
   2 live fonts and 16 live boxes.
 - **Untrusted content stays pixels.** Text and pictures from the internet are only ever
   drawn. Names, directives and paths never come from fetched content.

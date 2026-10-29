@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neochumby-classic"
 version = "0.1.0"
-description = "The classic Chumby experience for neochumby: a renderer for weather, news, stocks, photos and an aurora, and a \"my channels\" web page."
+description = "The classic Chumby experience for neochumby: a renderer for weather, news, stocks, photos, an aurora and Flurry, and a \"my channels\" web page."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Matthew Croall" }]
@@ -32,6 +32,7 @@ neochumby-classic-admin = "neochumby_classic.admin:main"
 # Keep widget.BUILTIN in step with this table.
 [project.entry-points."neochumby_classic.widgets"]
 aurora = "neochumby_classic.widgets.aurora"
+flurry = "neochumby_classic.widgets.flurry"
 news = "neochumby_classic.widgets.news"
 photos = "neochumby_classic.widgets.photos"
 stocks = "neochumby_classic.widgets.stocks"

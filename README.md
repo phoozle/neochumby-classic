@@ -2,8 +2,8 @@
 
 The classic Chumby experience for [neochumby](https://github.com/johnmerchant/neochumby):
 a 90s weather channel for anywhere in Australia, ABC News, stock quotes, your photos and a
-Vista-style aurora screensaver (and, if you add them, the Whyalla News and a Pajama Sam
-screensaver from your own copies of the games), with Home, Settings and Music screens, and
+Vista-style aurora screensaver, the Mac's Flurry screensaver (and, if you add them, the
+Whyalla News and a Pajama Sam screensaver from your own copies of the games), with Home, Settings and Music screens, and
 a "my channels" web page modelled on chumby.com's.
 
 The Chumby (a 266 MHz ARM with no FPU) only copies pictures to its screen. Everything hard
@@ -222,13 +222,18 @@ your own home, and certainly before anyone redistributes what it draws.
 | financialmodelingprep.com, assets.parqet.com | Stock logos | Unofficial. The logos are the companies' trademarks; they are fetched and cached on your server, never committed |
 | SomaFM's API and streams | Music | SomaFM's terms for its API and channel artwork |
 
+Flurry is the one thing the Chumby draws itself: Calum Robinson's Mac OS X screensaver
+(BSD licence), ported to fixed point in neochumby's classic engine and run live, at 25 frames
+a second in about half the Chumby's CPU. This program only writes the page and its options
+(preset, streams, colours, speed); nothing of Apple's is used.
+
 The weather has no default place: you choose it. Whyalla (South Australia) appears only as an
 example, in the help text and the tests. The Whyalla News is that town's paper, an optional
 widget: it is off until you add it from "add apps" on the web page.
 
 ## Widgets
 
-The seven widgets are plugins, found through Python entry points, exactly as a widget from
+The eight widgets are plugins, found through Python entry points, exactly as a widget from
 another repository would be. [docs/widgets.md](docs/widgets.md) is the widget API
 (version 1): what a widget declares, what it may draw, the rules that keep the Chumby fast
 (stable names, write only what changed, no per-render times, a memory budget per page,

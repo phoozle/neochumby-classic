@@ -115,6 +115,7 @@ DIST = "neochumby-classic"
 # has no metadata to find entry points in; tests/smoke.py checks the two lists agree.
 BUILTIN = {
     "aurora": "neochumby_classic.widgets.aurora",
+    "flurry": "neochumby_classic.widgets.flurry",
     "news": "neochumby_classic.widgets.news",
     "pajamasam": "neochumby_classic.widgets.pajamasam",
     "photos": "neochumby_classic.widgets.photos",
