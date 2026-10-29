@@ -89,8 +89,23 @@ services as neochumbyd's user (`sudo ./install.sh --user neochumbyd`), or list t
 to render in `/etc/neochumby-classic/env` (`NEOCHUMBY_CLASSIC_CHUMBYS="kitchen lounge"`);
 the web page's Chumbys page needs the socket either way.
 
-**With Docker** instead: see [docker-compose.yml](docker-compose.yml). Both containers run
-as neochumbyd's user.
+**With Docker** instead: see [docker-compose.yml](docker-compose.yml), whose comments list
+what to make first. Both containers run as a user of their own (`CLASSIC_UID`, never
+neochumbyd's), with neochumbyd's group as their only group, a read-only root filesystem and
+no capabilities. They don't see neochumbyd's state directory, so not its key, pairings or
+owner token: only its admin socket, bound on its own, and its app tree, read-only. The web
+page is published on the address you give (`CLASSIC_WEB_ADDR`, the server's LAN address),
+not on every interface:
+
+```sh
+CLASSIC_UID=$(id -u neochumby-classic) NEOCHUMBYD_GID=$(getent group neochumbyd | cut -d: -f3) \
+CLASSIC_WEB_ADDR=192.0.2.10 docker compose up -d
+```
+
+The socket is subject to the same rule as above: neochumbyd answers it for its group only
+once it lets its group in, so until then name the Chumbys (`NEOCHUMBY_CLASSIC_CHUMBYS`, in a
+`docker-compose.override.yml`). neochumbyd makes its socket again when it restarts, and the
+bind keeps the old one, so run `docker compose restart` after restarting neochumbyd.
 
 ### Settings
 

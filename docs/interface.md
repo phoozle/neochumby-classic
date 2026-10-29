@@ -21,10 +21,20 @@ $NEOCHUMBY_CLASSIC_OUT/              default /var/lib/neochumby-classic/out
 
 - `<chumby>` appears when the renderer first renders that Chumby. It isn't removed when a
   Chumby is unpaired (the companion only serves paired Chumbys anyway).
-- **Permissions** (install.sh): `$NEOCHUMBY_CLASSIC_OUT` and each `<chumby>` directory are
-  owned by the renderer's user and by neochumbyd's group, mode `2750` (setgid, so new
-  directories keep the group). Files are `0640`. The companion, running as neochumbyd,
-  reads them through the group.
+- **Permissions** (install.sh, and docker-compose.yml's first steps): `$NEOCHUMBY_CLASSIC_OUT`
+  and each `<chumby>` directory are owned by the renderer's user and by neochumbyd's group,
+  mode `2750` (setgid, so new directories keep the group). Files are `0640`. The companion,
+  running as neochumbyd, reads them through the group. The renderer and the web page run
+  as their own user (`neochumby-classic`), never as neochumbyd's. Under Docker,
+  neochumbyd's group is their only group, and they see none of neochumbyd's state
+  directory, only its admin socket and its app tree.
+- **neochumbyd with `--plugin-uids`** (johnmerchant/neochumby#53, if it's merged) runs each
+  app's companion under a uid of the app's own, with no other groups, so neochumbyd's
+  group no longer reaches it. Then, as root, give `$NEOCHUMBY_CLASSIC_OUT`, `refresh/` and
+  `info/` (and what's in them) to the classic app's group in place of neochumbyd's: its
+  uid, which is also its gid, is on the `classic` line of neochumbyd's
+  `<state>/plugin-uids`. The setgid bit keeps new files in that group. Untested so far.
+  Without the flag, nothing changes.
 - Other names may appear in future (they will start with a letter). Deliver only what
   `hashes.txt` lists, plus `manifest.txt` and `hashes.txt` themselves.
 

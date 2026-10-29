@@ -86,4 +86,33 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t neochumby-classic .
       - run: docker run --rm neochumby-classic neochumby-classic-admin starts
-      - run: NEOCHUMBYD_UID=1000 NEOCHUMBYD_GID=1000 docker compose config --quiet
+      - name: Compose, with stand-ins for neochumbyd's socket and tree
+        env:
+          CLASSIC_UID: "61500"
+          NEOCHUMBYD_GID: "61501"
+          CLASSIC_WEB_ADDR: 127.0.0.1
+          CLASSIC_STATE: /tmp/classic-state
+          NEOCHUMBYD_ADMIN: /tmp/nd/admin.sock
+          NEOCHUMBYD_TREE: /tmp/nd/tree
+          CLASSIC_ASSETS: /tmp/classic-assets
+        run: |
+          docker compose config --quiet
+          mkdir -p /tmp/nd/tree/apps /tmp/classic-assets
+          sudo install -d -o "$CLASSIC_UID" -g "$NEOCHUMBYD_GID" -m 2750 "$CLASSIC_STATE" "$CLASSIC_STATE/out"
+          sudo install -d -o "$CLASSIC_UID" -g "$NEOCHUMBYD_GID" -m 2770 "$CLASSIC_STATE/refresh" "$CLASSIC_STATE/info"
+          python3 -c 'import socket,time; s=socket.socket(socket.AF_UNIX); s.bind("/tmp/nd/admin.sock"); s.listen(); time.sleep(600)' &
+          sleep 1
+          echo 0123456789abcdef0123456789abcdef > owner-token
+          sudo chown "$CLASSIC_UID" owner-token && sudo chmod 400 owner-token
+          docker compose up -d --build
+          for _ in $(seq 20); do curl -fsS -o /dev/null http://127.0.0.1:8080/ && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/ | grep -q 'my channels'
+          # Its own uid, neochumbyd's group and no other, no capabilities, on 127.0.0.1 only.
+          test "$(docker compose exec -T web id -u)" = "$CLASSIC_UID"
+          test "$(docker compose exec -T web id -G)" = "$NEOCHUMBYD_GID"
+          docker compose exec -T web grep -qx 'CapEff:[[:space:]]*0*' /proc/self/status
+          docker compose port web 8080 | grep -qx '127.0.0.1:8080'
+          docker compose exec -T web test ! -e /neochumbyd
+          test "$(docker compose ps --status running -q | wc -l)" = 2
+          docker compose logs
+          docker compose down
