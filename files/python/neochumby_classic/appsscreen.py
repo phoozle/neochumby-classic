@@ -39,7 +39,7 @@ PREV_BOX, NEXT_BOX = (10, 206, 74, 230), (82, 206, 146, 230)
 
 
 def colour(s):
-    """A manifest's colour=RRGGBB, else the session's default."""
+    """A manifest's color=RRGGBB (colour= in older trees), else the session's default."""
     s = (s or "").strip().lstrip("#")
     return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4)) if re.fullmatch(r"[0-9A-Fa-f]{6}", s) else DEFAULT_COLOUR
 
@@ -66,7 +66,7 @@ def full_apps(tree=None):
         if not title or not m.get("exec"):
             continue
         icon = next((p for p in (os.path.join(d, "icon.png"), os.path.join(d, "files", "icon.png")) if os.path.isfile(p)), None)
-        out.append({"name": name, "title": title, "colour": colour(m.get("colour")), "icon": icon,
+        out.append({"name": name, "title": title, "colour": colour(m.get("color") or m.get("colour")), "icon": icon,
                     "player": m.get("player", "").lower() == "true"})
     return sorted(out, key=lambda a: (not a["player"], a["title"].lower(), a["name"]))[:MAX_APPS]
 

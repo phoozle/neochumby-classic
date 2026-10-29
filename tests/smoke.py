@@ -413,7 +413,7 @@ def apps_screen(work):
             d = os.path.join(root, "apps", f"game{k:02d}")
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "manifest"), "w") as fh:
-                fh.write(f"title=GAME {k}\nexec=neochumby-game{k}\n" + ("colour=dc281e\n" if k % 2 else ""))
+                fh.write(f"title=GAME {k}\nexec=neochumby-game{k}\n" + ({1: "color=dc281e\n", 3: "colour=dc281e\n"}.get(k % 4, "")))
         for name, man in (("classic", "title=Classic\nexec=neochumby-classic\nstart=true\n"),
                           ("somafm", "title=SomaFM\nexec=neochumby-somafm\nplayer=true\n"),
                           ("radio", "title=Radio\nexec=neochumby-radio\nplayer=true\n"),
@@ -437,6 +437,9 @@ def apps_screen(work):
         apps = apps[2:]
         check(sorted(a["name"] for a in apps) == [f"game{k:02d}" for k in range(n)] and apps[0]["icon"],
               f"apps: {n} apps from the tree, without classic, home, one with no exec or a bad name")
+        by = {a["name"]: a["colour"] for a in apps}
+        check(n < 4 or (by["game01"] == by["game03"] == (0xdc, 0x28, 0x1e) and by["game02"] == appsscreen.DEFAULT_COLOUR),
+              "apps: a tile's colour from color=, or colour= in older trees")
         out = os.path.join(work, "apps", str(n))
         render.render(out, cfg, "kitchen", now=NOW)
         lines = manifest(out)
