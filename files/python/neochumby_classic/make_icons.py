@@ -122,6 +122,14 @@ def aurora():
     return finish(gloss(im.convert("RGB"), 30), "aurora")
 
 
+def flurry():
+    """Flurry's still (widgets/flurry.py), a little closer in."""
+    from .widgets import flurry as fl
+    im = fl.still(int(Z * 1.25), int(Z * 1.25))
+    im = im.crop((int(Z * .2), int(Z * .2), int(Z * 1.2), int(Z * 1.2)))
+    return finish(gloss(im, 14), "flurry")
+
+
 def news():
     """A folded newspaper (no publisher's logo)."""
     im = vgrad((Z, Z), (250, 250, 250), (220, 222, 228))
@@ -146,7 +154,7 @@ def default():
 
 
 def sheet():
-    icons = [weather(), stocks(), aurora(), news(), default()]
+    icons = [weather(), stocks(), aurora(), flurry(), news(), default()]
     return icons
 
 

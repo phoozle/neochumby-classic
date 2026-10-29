@@ -19,6 +19,8 @@ published), so the run is the same everywhere. It checks that:
     or chosen; the sun times from the station; old options migrated; renders that change
     nothing write nothing;
   - limits.py and docs/widgets.md's table of the engine's limits agree;
+  - Flurry: its page and the engine's `flurry` line, with the options it was given, and
+    that lines the engine would skip are refused;
   - Pajama Sam (synthetic clips only, from a stand-in converter: no game data anywhere):
     the "add your files" page, the folder checks, Convert on the web page with its
     progress and exit codes, the clip page, and that a second render writes nothing;
@@ -104,8 +106,8 @@ def widgets_found():
         declared = tomllib.load(fh)["project"]["entry-points"][widget.GROUP]
     check(declared == widget.BUILTIN, "widget.BUILTIN matches pyproject.toml's entry points")
     ids = [a["id"] for a in config.registry()]
-    check(ids == ["weather", "news", "whyallanews", "stocks", "photos", "aurora", "pajamasam"],
-          f"the seven built-in widgets are found: {ids}")
+    check(ids == ["weather", "news", "whyallanews", "stocks", "photos", "aurora", "flurry", "pajamasam"],
+          f"the eight built-in widgets are found: {ids}")
     for a in config.registry():
         check(a["icon_path"] is not None, f"{a['id']} has an icon")
 
@@ -138,7 +140,7 @@ def renders(work, out, shots):
     pages = [t for t in lines if t[0] == "page"]
     check(len(pages) == sum(s["pages"] for s in kept), f"{len(pages)} slideshow pages, as planned")
     for app, prefix in (("weather", "weather_"), ("news", "news_slide_"), ("whyallanews", "wn_slide"), ("stocks", "stocks_"),
-                        ("photos", "photo"), ("aurora", "aurora_"), ("pajamasam", "pjs_setup")):
+                        ("photos", "photo"), ("aurora", "aurora_"), ("flurry", "flurry_"), ("pajamasam", "pjs_setup")):
         check(any(t[2].startswith(prefix) for t in pages), f"{app} has a page")
     screens = {t[1] for t in lines if t[0] == "screen"}
     check("music" not in {t[1] for t in lines if t[0] == "screen"} and not any(t[0] == "station" for t in lines),
@@ -215,6 +217,7 @@ def renders(work, out, shots):
                           ("stocks", preview.page(out, pages["stocks_summary"])),
                           ("photos", preview.page(out, pages["photos_0"])),
                           ("aurora", preview.page(out, pages["aurora_bg"])),
+                          ("flurry", preview.page(out, pages["flurry_still"])),
                           ("home", preview.screen(out, "home", values=preview.EXAMPLE)),
                           ("settings", preview.screen(out, "settings"))):
             img.resize((640, 480), resample=0).save(os.path.join(shots, f"{name}.png"), optimize=True)
@@ -338,6 +341,34 @@ def weather_places(work):
     with open(os.path.join(ROOT, "docs", "widgets.md")) as fh:
         rows = re.findall(r"^\s*\| `([a-z]+)` \| [^|]+\| (\d+) \|", fh.read(), re.M)
     check(dict((k, int(v)) for k, v in rows) == limits.LIMITS, f"limits.py matches docs/widgets.md's table {rows}")
+
+
+# ---------------------------------------------------------------- Flurry
+def flurry(work, out):
+    """Its page, the engine's line with the options given, and the lines the engine would skip."""
+    from neochumby_classic import config, render
+    from neochumby_classic.widgets import flurry as fl
+    lines = manifest(out)
+    page = next(t for t in lines if t[0] == "page" and t[2] == "flurry_still.raw")
+    fline = [t for t in lines if t[0] == "flurry"]
+    check(fline == [["flurry", page[1], "classic"]] and "noclock" in page and "noticker" in page,
+          f"flurry: one page, drawn by the engine's classic Flurry {fline}")
+    check(fl.line(3, {"preset": "fire", "streams": "6", "color": "rainbow", "speed": "0.5"})
+          == "flurry 3 fire streams=6 color=rainbow speed=0.5"
+          and fl.line(3, {"preset": "nonesuch", "streams": "preset", "color": "plaid", "speed": "9"}) == "flurry 3 classic",
+          "flurry: options to the line, and anything else left to the preset")
+    schema = {f["key"]: f for f in fl.CONFIG_SCHEMA}
+    clean, errs = config.validate(fl.CONFIG_SCHEMA, {"streams": "99", "speed": "2"})
+    check("streams" in errs and clean["streams"] == "preset" and clean["speed"] == "2",
+          "flurry: the form refuses streams=99 and keeps the rest")
+    check(all(c[0] in render.FLURRY_PRESETS for c in schema["preset"]["choices"])
+          and all(c[0] == "preset" or c[0] in render.FLURRY_COLOURS for c in schema["color"]["choices"]),
+          "flurry: the form offers only what the engine takes")
+    good = ["page 0 a.raw 30", "flurry 0 water streams=3 color=tiedye speed=1.5 later=1"]
+    check(not render.problems(good), "flurry: a good line passes (an unknown key is a later engine's)")
+    for bad in ("flurry 1 classic", "flurry 0 nonesuch", "flurry 0 streams=17", "flurry 0 colour=plaid",
+                "flurry 0 speed=4.5", "flurry 0 color=plaid", "flurry 0 classic rgb", "flurry 0 puffs=10"):
+        check(render.problems(good[:1] + [bad]), f"flurry: {bad!r} is refused")
 
 
 # ---------------------------------------------------------------- Settings -> Network and Chumby Info
@@ -789,6 +820,7 @@ def main():
     renders(work, out, a.screenshots)
     whyalla(work, out)
     weather_places(work)
+    flurry(work, out)
     apps_screen(work)
     chumby_info(work, out)
     service(work)

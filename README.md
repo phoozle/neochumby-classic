@@ -2,8 +2,9 @@
 
 The classic Chumby experience for [neochumby](https://github.com/johnmerchant/neochumby):
 a 90s weather channel for anywhere in Australia, ABC News, stock quotes, your photos and a
-Vista-style aurora screensaver (and, if you add them, the Whyalla News and a Pajama Sam
-screensaver from your own copies of the games), with Home, Settings and APPS screens, and
+Vista-style aurora screensaver, the Mac's Flurry screensaver (and, if you add them, the
+Whyalla News and a Pajama Sam screensaver from your own copies of the games), with Home,
+Settings and APPS screens, and
 a "my channels" web page modelled on chumby.com's.
 
 Music is a neochumby app of its own, a *player* (SomaFM, AirPlay and others; any app whose
@@ -227,13 +228,18 @@ your own home, and certainly before anyone redistributes what it draws.
 | Yahoo Finance's chart endpoint (`query1.finance.yahoo.com/v8/finance/chart`) | Stocks | Unofficial and undocumented. Yahoo's terms allow personal use, not redistribution |
 | financialmodelingprep.com, assets.parqet.com | Stock logos | Unofficial. The logos are the companies' trademarks; they are fetched and cached on your server, never committed |
 
+Flurry is the one thing the Chumby draws itself: Calum Robinson's Mac OS X screensaver
+(BSD licence), ported to fixed point in neochumby's classic engine and run live, at 25 frames
+a second in about half the Chumby's CPU. This program only writes the page and its options
+(preset, streams, colours, speed); nothing of Apple's is used.
+
 The weather has no default place: you choose it. Whyalla (South Australia) appears only as an
 example, in the help text and the tests. The Whyalla News is that town's paper, an optional
 widget: it is off until you add it from "add apps" on the web page.
 
 ## Widgets
 
-The seven widgets are plugins, found through Python entry points, exactly as a widget from
+The eight widgets are plugins, found through Python entry points, exactly as a widget from
 another repository would be. [docs/widgets.md](docs/widgets.md) is the widget API
 (version 1): what a widget declares, what it may draw, the rules that keep the Chumby fast
 (stable names, write only what changed, no per-render times, a memory budget per page,

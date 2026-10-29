@@ -19,6 +19,7 @@ LIMITS = {                      # manifest directive -> how many the engine hold
     "actor": 128,
     "glow": 32,
     "glowseq": 8,
+    "flurry": 8,
     "station": 64,
     "sun": 32,
     "secsopts": 12,

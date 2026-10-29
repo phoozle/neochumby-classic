@@ -38,7 +38,7 @@ PAGE_BUDGET = 2 * 1024 * 1024  # bytes one page or screen may need in memory at 
 # Directives a widget may write (docs/widgets.md). The rest belong to this module.
 WIDGET_DIRECTIVES = {"page", "pagenight", "pagetap", "sprite", "actor", "screen", "pane", "hot", "slider",
                      "logofx", "scroller", "bgscroll", "glow", "glowseq", "clock", "clocknight", "ticker",
-                     "tickernight", "livefont", "live", "clip"}
+                     "tickernight", "livefont", "live", "clip", "flurry"}
 LIVE_KEYS, CHARSET = widget.LIVE_KEYS, widget.LIVE_CHARSET
 ONCE = {"clock", "clocknight", "ticker", "tickernight"}     # global: the first widget's wins
 
@@ -134,7 +134,8 @@ def check_lines(app, r, first, out):
             continue
         if t[0] not in WIDGET_DIRECTIVES:
             raise WidgetError(f"{app}: directive {t[0]!r} isn't one a widget may write")
-        if t[0] in ("pagenight", "pagetap", "sprite", "actor", "logofx", "scroller", "bgscroll", "glow", "glowseq", "clip"):
+        if t[0] in ("pagenight", "pagetap", "sprite", "actor", "logofx", "scroller", "bgscroll", "glow", "glowseq", "clip",
+                    "flurry"):
             if len(t) < 3 or not t[1].isdigit() or not first <= int(t[1]) < first + len(pages):
                 raise WidgetError(f"{app}: {t[0]} for a page that isn't its own: {ln}")
         m = re.fullmatch(r"page(?:night)?:(\d+)", t[1]) if t[0] in ("pane", "live") and len(t) > 1 else None
@@ -180,6 +181,38 @@ def _size(out, name):
         return os.path.getsize(os.path.join(out, name))
     except OSError:
         return None
+
+
+FLURRY_PRESETS = {"classic", "rgb", "water", "fire", "psychedelic", "random"}
+FLURRY_COLOURS = {"red", "magenta", "blue", "cyan", "green", "yellow", "slowcyclic", "cyclic", "tiedye", "rainbow",
+                  "white", "multi", "dark"}
+
+
+def flurry_words_ok(words):
+    """Whether the engine takes a `flurry` line's words (flurry::Options::parse): a preset
+    first, then KEY=VALUE options in range. An unknown key is fine (a later engine's)."""
+    def num(v, lo, hi):
+        return v.isdigit() and lo <= int(v) <= hi
+
+    def q8(v, lo, hi):          # "1.25" in 256ths, as the engine reads it
+        m = re.fullmatch(r"(\d{1,7})(?:\.(\d{0,3})\d*)?", v)
+        if not m:
+            return False
+        milli = int(m.group(1)) * 1000 + int((m.group(2) or "").ljust(3, "0"))
+        return lo <= (milli * 256 + 500) // 1000 <= hi
+
+    for i, w in enumerate(words):
+        if "=" not in w:
+            if i or w not in FLURRY_PRESETS:
+                return False
+            continue
+        k, v = w.split("=", 1)
+        ok = {"streams": lambda: num(v, 1, 16), "colour": lambda: v in FLURRY_COLOURS, "color": lambda: v in FLURRY_COLOURS,
+              "speed": lambda: q8(v, 0, 1024), "thickness": lambda: num(v, 1, 20000), "bright": lambda: q8(v, 16, 1024),
+              "seed": lambda: num(v, 0, 2**32 - 1), "puffs": lambda: num(v, 64, 3600), "rate": lambda: num(v, 10, 121)}
+        if k in ok and not ok[k]():
+            return False
+    return True
 
 
 def problems(lines, out=None):
@@ -230,6 +263,9 @@ def problems(lines, out=None):
                 elif out is not None and _size(out, t[2]) != cw * ch * len(CHARSET) * 2:
                     bad.append(f"livefont file {t[2]} isn't {cw}x{ch * len(CHARSET)}")
                 fonts.add(t[1])
+            elif k == "flurry":
+                if not t[1].isdigit() or int(t[1]) >= pages or not flurry_words_ok(t[2:]):
+                    bad.append(f"flurry {ln[:60]!r}")
             elif k == "clip":
                 names = [n for n in t[3:] if n != "random"]
                 if not t[1].isdigit() or int(t[1]) >= pages or t[2] != "." or not names \
