@@ -171,11 +171,23 @@ manifest by their file name only.
 | `slider SCREEN EMPTY FULL KNOB W H X Y T0 T1 KW KH` | the volume slider |
 
 Actions: `slideshow` (back to the slideshow, to the page a `pagetap` came from),
-`screen NAME`, `chumby` (leave for the stock Chumby software), `music_toggle`,
-`station N`, `next_station`, `night`, `nightmode`, `pin`, `next_app`, `prev_app`,
-`secs_up`, `secs_down`, `app NAME` (open neochumby app NAME full screen: the engine asks the
-session to `open` it, and the session refuses an app it doesn't have). State variables for panes: `music`, `station`, `night`,
-`nightmode`, `pin`, `secs`, `app`, and the live values `wifi` (0-4 bars) and `wifi_pct`.
+`screen NAME`, `chumby` (leave for the stock Chumby software), `night`, `nightmode`, `pin`,
+`next_app`, `prev_app`, `secs_up`, `secs_down`, and:
+
+- `app NAME`: open neochumby app NAME full screen (the engine asks the session to `open`
+  it, and the session refuses an app it doesn't have);
+- `player SCREEN`: open the Chumby's player, the app that plays its music (the session's
+  `$NEOCHUMBY_PLAYER`: its `player=` setting, else the default), or show `SCREEN` if it has
+  none (Home's MUSIC: `player apps_p0`);
+- `player_toggle`: pause or resume the player (the engine sends `player toggle` to the
+  session, which tells the player's service). The engine still takes the C engine's
+  `music_toggle` for it.
+
+State variables for panes: `player` (MUTE's face: 1 playing, 0 paused; the engine also
+takes the C engine's `music`), `night`, `nightmode`, `pin`, `secs`, `app`, and the
+live values `wifi` (0-4 bars) and `wifi_pct`. (Engines from before players also had
+`station N`, `next_station` and the `station` directive, from when classic played radio
+itself; nothing here uses them, and the current engine skips them.)
 
 ### Live values
 
@@ -215,7 +227,7 @@ one wins, and later ones are dropped): `clock FILE CELLW CELLH RIGHT Y W0..W14`,
 writes these.
 
 **Not for widgets**: `sun`, `station`, `secsopts` and `pageapp` belong to the renderer,
-which also draws Home, Settings, Music and the QR code screen. Lines starting with `#` are
+which also draws Home, Settings, APPS and the QR code screen. Lines starting with `#` are
 comments. The renderer refuses (fails the render on) any other directive, a page line out
 of order, a page-numbered directive for another widget's page, an unsafe file name or a
 file that wasn't written.

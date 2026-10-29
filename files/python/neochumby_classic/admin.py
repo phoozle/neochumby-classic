@@ -12,13 +12,14 @@ is one line of space-separated words; the answer is data lines, then "ok", "ok W
     paired               -> paired NAME KEYHEX [k=v ...]  (per Chumby) ... ok
     pending              -> pending CODE NAME ADDRESS KEYHEX (per request) ... ok
     approve CODE TOKEN   -> ok NAME | error ...
-    refuse CODE          -> ok | error ...
+    refuse CODE TOKEN    -> ok | error ...
     forget NAME TOKEN    -> ok | error ...
-    set NAME KEY=VALUE   -> ok | error ...      (KEY= with no value removes it)
+    set NAME KEY=VALUE TOKEN -> ok | error ...  (KEY= with no value removes it)
     check TOKEN          -> ok | error wrong token
 
 TOKEN is the server owner's token (`neochumbyd token` prints it). neochumbyd requires it
-on approve and forget, so a fault in this program can't pair or unpair a Chumby by itself.
+on every change (approve, refuse, forget, set), so a fault in this program can't change
+a Chumby by itself: the page passes the token the owner typed at sign-in.
 
 Start apps are the apps in neochumbyd's tree whose manifest says start=true (proposal
 0002): only those are offered.
@@ -50,6 +51,9 @@ DELIVERY = ("nfs", "sync")
 # that lets an app be one (proposal 0002). Only these lines name them.
 START_SETTING = "start"
 START_MANIFEST_KEY = "start"
+PLAYER_SETTING = "player"                     # a Chumby's player (neochumbyd set NAME player=APP)
+PLAYER_MANIFEST_KEY = "player"                # player = true: an app that plays music (the session's flag)
+DEFAULT_PLAYER = "somafm"                     # the session's default, if it's in the tree
 DEFAULT_SOCKET = "/var/lib/neochumbyd/admin.sock"
 DEFAULT_TREE = "/var/lib/neochumbyd/tree"
 
@@ -201,10 +205,12 @@ def approve(code, token):
     return client().ask("approve", code, token)[1]
 
 
-def refuse(code):
+def refuse(code, token):
     if not CODE.fullmatch(code or ""):
         raise AdminError("a pairing code is six digits")
-    client().ask("refuse", code)
+    if not OWNER_TOKEN.fullmatch(token or ""):
+        raise AdminError("sign in again")
+    client().ask("refuse", code, token)
 
 
 def forget(name, token):
@@ -215,23 +221,58 @@ def forget(name, token):
     client().ask("forget", name, token)
 
 
-def set_setting(name, key, value):
+def set_setting(name, key, value, token):
+    """set NAME KEY=VALUE TOKEN: every change over the socket needs the signed-in owner's token."""
     if not NAME.fullmatch(name or "") or not re.fullmatch(r"[a-z_]{1,32}", key) or not VALUE.fullmatch(value or ""):
         raise AdminError("not a valid setting")
-    client().ask("set", name, f"{key}={value}")
+    if not OWNER_TOKEN.fullmatch(token or ""):
+        raise AdminError("sign in again")
+    client().ask("set", name, f"{key}={value}", token)
 
 
-def set_start(name, app):
+def set_start(name, app, token):
     """A Chumby's start app; "" goes back to neochumbyd's default."""
     if app and app not in [a for a, _ in start_apps()]:
         raise AdminError("not a start app in this server's tree")
-    set_setting(name, START_SETTING, app)
+    set_setting(name, START_SETTING, app, token)
 
 
-def set_delivery(name, how):
+def players():
+    """[(app, title)] for every player in the tree (an app that plays music) that can be opened."""
+    try:
+        apps = sorted(os.listdir(os.path.join(tree_dir(), "apps")))
+    except OSError:
+        return []
+    out = []
+    for app in apps:
+        if NAME.fullmatch(app):
+            m = manifest(app)
+            if m.get(PLAYER_MANIFEST_KEY, "").strip().lower() == "true" and m.get("exec") and m.get("title"):
+                out.append((app, m["title"]))
+    return out
+
+
+def default_player(setting, apps=None):
+    """The player a Chumby's MUSIC opens: its player= setting if that's a player here, else the
+    session's default (somafm) if it's here, else the first by name, else None."""
+    names = [a for a, _ in (players() if apps is None else apps)]
+    for cand in (setting, DEFAULT_PLAYER):
+        if cand and cand in names:
+            return cand
+    return names[0] if names else None
+
+
+def set_player(name, app, token):
+    """A Chumby's player; "" goes back to the default. Needs the owner's token."""
+    if app and app not in [a for a, _ in players()]:
+        raise AdminError("not a player in this server's tree")
+    set_setting(name, PLAYER_SETTING, app, token)
+
+
+def set_delivery(name, how, token):
     if how and how not in DELIVERY:
         raise AdminError("delivery is nfs or sync")
-    set_setting(name, "delivery", how)
+    set_setting(name, "delivery", how, token)
 
 
 def main(argv=None):

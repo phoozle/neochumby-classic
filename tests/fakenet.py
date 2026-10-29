@@ -2,7 +2,7 @@
 
 install(now) replaces urllib.request.urlopen with a function that answers each URL the
 widgets ask for (BOM's FTP XML, the news RSS and article pages, the Whyalla News feed,
-Yahoo's chart JSON, the logo hosts, SomaFM) with made-up data of the same shape, and refuses anything else. It
+Yahoo's chart JSON, the logo hosts) with made-up data of the same shape, and refuses anything else. It
 also freezes the clock (datetime.now, date.today, time.time) at `now`, so two renders
 with the same data are byte-identical. Everything here is synthetic: no third-party
 content is stored in the repository.
@@ -246,19 +246,6 @@ def yahoo_chart(url, now):
     return json.dumps({"chart": {"result": [res], "error": None}}).encode()
 
 
-SOMA = ["groovesalad", "dronezone", "deepspaceone", "lush", "secretagent", "spacestation"]
-
-
-def somafm(url):
-    if url.endswith("channels.json"):
-        return json.dumps({"channels": [{"id": c, "title": c.title(), "description": f"Made-up description of {c}.",
-                                         "image": f"https://api.somafm.com/img/{c}.png"} for c in SOMA]}).encode()
-    if url.endswith(".pls"):
-        sid = url.rsplit("/", 1)[1][:-4]
-        return f"[playlist]\nnumberofentries=1\nFile1=http://ice1.somafm.com/{sid}-128-mp3\n".encode()
-    return picture(url, 120, 120)
-
-
 def answer(url, now):
     u = urllib.parse.urlsplit(url)
     host, path = u.hostname or "", u.path
@@ -275,8 +262,6 @@ def answer(url, now):
         if _seed(sym) % 3 == 0:                                # some symbols have no logo
             raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
         return logo(sym)
-    if host.endswith("somafm.com"):
-        return somafm(url)
     if "abc-cdn.net.au" in host:
         return picture(url)
     if host == "whyallanewsonline.com.au":

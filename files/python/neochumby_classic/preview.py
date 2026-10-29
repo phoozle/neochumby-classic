@@ -118,7 +118,7 @@ def page(out, n, night=False, clock="7:42 PM", ticker_at=260, values=None):
 
 
 def screen(out, name, state=None, values=None):
-    state = dict({"music": 0, "station": 0, "night": 0, "pin": 0, "page": 0, "vol": 65}, **(state or {}))
+    state = dict({"player": 0, "night": 0, "pin": 0, "page": 0, "vol": 65}, **(state or {}))
     lines = manifest(out)
     s = next(t for t in lines if t[0] == "screen" and t[1] == name)
     img = load(out, s[2], W, H)

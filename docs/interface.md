@@ -133,7 +133,9 @@ Otherwise each Chumby is rendered when it first appears, then every
 Home's APPS button opens screen `apps_p0` (and `apps_p1`, ... six apps a page, each with a
 `_night` copy): a tile for every app in neochumbyd's tree (`$NEOCHUMBY_TREE`, else
 `$NEOCHUMBY_CLASSIC_TREE`) whose `apps/<name>/manifest` has a `title` and an `exec`, except
-`classic` and `home`. A tile shows the app's `icon.png` (from its `files/`), or its initial on
+`classic` and `home`. Players (`player = true`: apps that play music) come first, with a
+note badge; the Chumby's player (its `player=` setting from neochumbyd's `paired` list, else `somafm` if
+the tree has it, else the first by name) has a star. A tile shows the app's `icon.png` (from its `files/`), or its initial on
 its `colour`, and its title in that colour. A tap on it is a hot zone with the engine's action
 `app <name>`, which the engine sends to the session as `open <name>`. The list is read at
 every render, so a new app shows at the next one.
