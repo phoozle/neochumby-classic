@@ -33,7 +33,7 @@ CONFIG_SCHEMA = [
     {"key": "streams", "type": "choice", "label": "Streams", "default": "preset",
      "choices": [["preset", "As the preset"]] + [[str(n), str(n)] for n in range(1, MAX_STREAMS + 1)],
      "help": "More streams cost the Chumby more: past about 6 it releases fewer puffs from each."},
-    {"key": "colour", "type": "choice", "label": "Colours", "default": "preset",
+    {"key": "color", "type": "choice", "label": "Colours", "default": "preset",
      "choices": [["preset", "As the preset"]] + [[c, COLOUR_NAMES.get(c, c.capitalize())] for c in COLOURS]},
     {"key": "speed", "type": "choice", "label": "Speed", "default": "preset",
      "choices": [["preset", "As the preset"]] + [[s, f"{s}x"] for s in SPEEDS]},
@@ -45,11 +45,11 @@ def line(page, opts=None):
     opts = opts or {}
     preset = opts.get("preset", "classic")
     words = [preset if preset in [p for p, _ in PRESETS] else "classic"]
-    streams, colour, speed = opts.get("streams"), opts.get("colour"), opts.get("speed")
+    streams, colour, speed = opts.get("streams"), opts.get("color"), opts.get("speed")
     if str(streams).isdigit() and 1 <= int(streams) <= MAX_STREAMS:
         words.append(f"streams={int(streams)}")
     if colour in COLOURS:
-        words.append(f"colour={colour}")
+        words.append(f"color={colour}")
     if speed in SPEEDS:
         words.append(f"speed={speed}")
     return f"flurry {page} " + " ".join(words)

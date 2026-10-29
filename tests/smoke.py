@@ -353,21 +353,21 @@ def flurry(work, out):
     fline = [t for t in lines if t[0] == "flurry"]
     check(fline == [["flurry", page[1], "classic"]] and "noclock" in page and "noticker" in page,
           f"flurry: one page, drawn by the engine's classic Flurry {fline}")
-    check(fl.line(3, {"preset": "fire", "streams": "6", "colour": "rainbow", "speed": "0.5"})
-          == "flurry 3 fire streams=6 colour=rainbow speed=0.5"
-          and fl.line(3, {"preset": "nonesuch", "streams": "preset", "colour": "plaid", "speed": "9"}) == "flurry 3 classic",
+    check(fl.line(3, {"preset": "fire", "streams": "6", "color": "rainbow", "speed": "0.5"})
+          == "flurry 3 fire streams=6 color=rainbow speed=0.5"
+          and fl.line(3, {"preset": "nonesuch", "streams": "preset", "color": "plaid", "speed": "9"}) == "flurry 3 classic",
           "flurry: options to the line, and anything else left to the preset")
     schema = {f["key"]: f for f in fl.CONFIG_SCHEMA}
     clean, errs = config.validate(fl.CONFIG_SCHEMA, {"streams": "99", "speed": "2"})
     check("streams" in errs and clean["streams"] == "preset" and clean["speed"] == "2",
           "flurry: the form refuses streams=99 and keeps the rest")
     check(all(c[0] in render.FLURRY_PRESETS for c in schema["preset"]["choices"])
-          and all(c[0] == "preset" or c[0] in render.FLURRY_COLOURS for c in schema["colour"]["choices"]),
+          and all(c[0] == "preset" or c[0] in render.FLURRY_COLOURS for c in schema["color"]["choices"]),
           "flurry: the form offers only what the engine takes")
-    good = ["page 0 a.raw 30", "flurry 0 water streams=3 colour=tiedye speed=1.5 later=1"]
+    good = ["page 0 a.raw 30", "flurry 0 water streams=3 color=tiedye speed=1.5 later=1"]
     check(not render.problems(good), "flurry: a good line passes (an unknown key is a later engine's)")
     for bad in ("flurry 1 classic", "flurry 0 nonesuch", "flurry 0 streams=17", "flurry 0 colour=plaid",
-                "flurry 0 speed=4.5", "flurry 0 classic rgb", "flurry 0 puffs=10"):
+                "flurry 0 speed=4.5", "flurry 0 color=plaid", "flurry 0 classic rgb", "flurry 0 puffs=10"):
         check(render.problems(good[:1] + [bad]), f"flurry: {bad!r} is refused")
 
 
