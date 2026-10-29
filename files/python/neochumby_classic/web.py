@@ -1003,11 +1003,11 @@ def chumbys_page(sess, flash=None, code=200):
         chumbys, pending = admin.listing()
     except admin.AdminError as e:
         chumbys, pending, flash = [], [], flash or ("err", f"Couldn't ask neochumbyd: {e}")
-    starts = admin.start_apps()
+    starts, players = admin.start_apps(), admin.players()
     out = [top("chumbys", "chumbys", flash), """<h1>chumbys</h1>
-<p>Every Chumby paired with this server. Its <b>start app</b> is the one it opens at boot and returns to. Its <b>delivery</b>
-is how it gets its apps and pictures: read over the network as it needs them (NFS), or copied onto its USB
-stick (sync).</p>"""]
+<p>Every Chumby paired with this server. Its <b>start app</b> is the one it opens at boot and returns to. Its <b>player</b>
+is the app MUSIC opens and MUTE pauses. Its <b>delivery</b> is how it gets its apps and pictures: read over the
+network as it needs them (NFS), or copied onto its USB stick (sync).</p>"""]
     out.append("<h2>asking to pair</h2>")
     if pending:
         out.append('<table class="ch"><tr><th>name</th><th>code</th><th>from</th><th></th></tr>')
@@ -1022,18 +1022,24 @@ stick (sync).</p>"""]
         out.append("<p>None. Tap PAIR on a Chumby's home screen and its request shows here.</p>")
     out.append("<h2>paired</h2>")
     if chumbys:
-        out.append('<table class="ch"><tr><th>name</th><th>start app</th><th>delivery</th><th></th></tr>')
+        out.append('<table class="ch"><tr><th>name</th><th>start app</th><th>player</th><th>delivery</th><th></th></tr>')
         for c in chumbys:
             start, how = c.settings.get(admin.START_SETTING, ""), c.settings.get("delivery", "")
             opts = [("", "the default (neochumbyd's)")] + starts
             if start and start not in [a for a, _ in starts]:
                 opts.append((start, f"{start} (not a start app in this tree)"))
             sel = "".join(f'<option value="{h(a)}"{" selected" if a == start else ""}>{h(t)}</option>' for a, t in opts)
+            player = c.settings.get(admin.PLAYER_SETTING, "")
+            mopts = [("", "Default (SomaFM)")] + players
+            if player and player not in [a for a, _ in players]:
+                mopts.append((player, f"{player} (not a player in this tree)"))
+            msel = "".join(f'<option value="{h(a)}"{" selected" if a == player else ""}>{h(t)}</option>' for a, t in mopts)
             dsel = "".join(f'<option value="{v}"{" selected" if v == how else ""}>{label}</option>'
                            for v, label in (("", "default"), ("nfs", "network (NFS)"), ("sync", "USB stick (sync)")))
             out.append(f"""<tr><td>{h(c.name)}<br><span class="key">{h(c.key[:16])}</span></td>
-<td colspan="2"><form method="post" action="/admin">{csrf}<input type="hidden" name="action" value="set">
-<input type="hidden" name="name" value="{h(c.name)}"><select name="start">{sel}</select> <select name="delivery">{dsel}</select>
+<td colspan="3"><form method="post" action="/admin">{csrf}<input type="hidden" name="action" value="set">
+<input type="hidden" name="name" value="{h(c.name)}"><select name="start">{sel}</select> <select name="player">{msel}</select>
+<select name="delivery">{dsel}</select>
 <button class="btn">Save</button></form></td><td>
 <form method="post" action="/admin" data-confirm="Forget {h(c.name)}? It will have to pair again.">{csrf}
 <input type="hidden" name="action" value="forget"><input type="hidden" name="name" value="{h(c.name)}"><button class="btn">Forget</button></form></td></tr>""")
@@ -1053,12 +1059,18 @@ def admin_act(f, sess):
         if action == "approve":
             admin.approve(f.get("code", ""), sess[2])
         elif action == "refuse":
-            admin.refuse(f.get("code", ""))
+            admin.refuse(f.get("code", ""), sess[2])
         elif action == "forget":
             admin.forget(f.get("name", ""), sess[2])
         elif action == "set":
-            admin.set_start(f.get("name", ""), f.get("start", ""))
-            admin.set_delivery(f.get("name", ""), f.get("delivery", ""))
+            if f.get("start") and f["start"] not in [a for a, _ in admin.start_apps()]:
+                raise admin.AdminError("not a start app in this server's tree")
+            if f.get("player") and f["player"] not in [a for a, _ in admin.players()]:
+                raise admin.AdminError("not a player in this server's tree")
+            admin.set_start(f.get("name", ""), f.get("start", ""), sess[2])
+            if "player" in f:
+                admin.set_player(f.get("name", ""), f["player"], sess[2])
+            admin.set_delivery(f.get("name", ""), f.get("delivery", ""), sess[2])
         else:
             return None, "Unknown action."
     except admin.AdminError as e:

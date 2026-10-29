@@ -63,6 +63,7 @@ class Service:
         self.out = out_root()
         self.interval = every()
         self.chumbys = []
+        self.settings = {}                              # name -> neochumbyd's settings for it (player=, ...)
         self.asked = 0.0
         self.unreachable = False
         self.due = {}                                   # name -> when its next render is due
@@ -80,7 +81,9 @@ class Service:
             return self.chumbys
         self.asked = now
         try:
-            names = sorted(c.name for c in admin.paired())
+            got = admin.paired()
+            names = sorted(c.name for c in got)
+            self.settings = {c.name: c.settings for c in got}
             if self.unreachable:
                 log("neochumbyd answers again")
             self.unreachable = False
@@ -126,6 +129,9 @@ class Service:
         info = os.path.join(self.state, "info", name)
         if os.path.isfile(info):
             cmd += ["--info", info]
+        player = self.settings.get(name, {}).get(admin.PLAYER_SETTING, "")
+        if NAME.fullmatch(player):
+            cmd += ["--player", player]
         start = time.monotonic()
         try:
             self.child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=sys.stderr)
